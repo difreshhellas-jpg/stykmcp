@@ -156,6 +156,7 @@ Decisions:
 | Tool-layer unit tests | `npm run test:mcp` (also part of `npm test`) | 18 pass |
 | MCP over stdio: 2-second jump to MP4, `.piv` round trip, 3-second jump kick | `npm run test:mcp:smoke` | pass; ffprobe `640x360, 24 fps, 48 frames, 2.0 s` and `960x540, 24 fps, 72 frames, 3.0 s`; GIF `480x270, 12 fps, 24 frames` |
 | Existing checks | `npm run check`, `npm test`, Python unittest | pass, except one pre-existing Node 22/ICU plural-order test (fails identically without this fork) |
+| Same smoke test on Windows 11 (Node 24.22, Playwright Chromium, winget ffmpeg, Python 3.12 without `zstandard`) | `npm run test:mcp:smoke` | pass; same frame counts and durations; export 0.5–1 s per clip |
 | Claude Code registration | `claude mcp add stykmcp -- node …/mcp/server.mjs`, then `claude mcp list` | `stykmcp … √ Connected` |
 | Real agent, prompt "3-second jump kick with camera punch-in, export MP4" | `claude -p … --model sonnet` | 2 server calls (`help basics`, then one `batch` ending with `export`), 2,723 chars of tool output, valid 3.0 s MP4 (960x540, 24 fps, 72 frames). An earlier version without signatures in `help` took 6 calls, 2 of them failed batches |
 
