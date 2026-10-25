@@ -14,6 +14,7 @@ import {snapshotPoseObject} from '../../src/pose-snapshot.mjs';
 import {createCameraMotion, validateCameraMotion, CAMERA_MOTION_TYPES, MOTION_PARAMETERS} from '../../src/camera-motion.mjs';
 import {createVfxClip, validateVfxClips} from '../../src/vfx-clips.mjs';
 import {VFX_REGISTRY, effectAvailable} from '../../src/vfx-registry.mjs';
+import {easedProgress} from '../../src/keyframe-easing.mjs';
 import {EASING_MODES} from './easing.mjs';
 import {PRESETS, presetFigure, boneIds, boneIndex, isStick, toNative, toDegrees, wrap, jointPositions, lowestOffset, bounds, anchorOffset, parseColor, hexColor, LIMBS, poseText} from './figures.mjs';
 import {MOVES, expandMove} from './moves.mjs';
@@ -28,6 +29,13 @@ const int = (value, label, min = 1, max = 1e6) => {
 };
 const hexArgb = color => { const [r, g, b] = parseColor(color); return (0xff << 24 | r << 16 | g << 8 | b) >>> 0; };
 const colorNumber = value => typeof value === 'string' && /^#?[0-9a-f]{6}$/i.test(value) ? parseInt(value.replace('#', ''), 16) : value;
+// Authored-key markers. Pivot keyframes are global (each holds every figure and
+// the camera), but agents think per figure: a key is "authored" for a figure or
+// the camera only where a tool set it; every other key is re-derived from the
+// authored keys around it after each edit, so channels never fight.
+const AUTHORED = '_mcpKey';
+const lerpAngle = (a, b, t) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
+const keyEasing = frame => frame._styk?.easing ?? {interpolation: 'linear'};
 const frameRange = list => {
   if (!list.length) return 'none';
   const parts = []; let a = list[0], b = a;
@@ -59,6 +67,7 @@ export class Studio {
     const before = JSON.stringify(this.doc);
     try {
       const result = fn(this.doc);
+      this._derive(this.doc);
       validateScene(this.doc);
       validateVfxClips(this.doc._styk?.vfxClips);
       if (this.doc._styk?.cameraMotion) validateCameraMotion(this.doc._styk.cameraMotion);
@@ -72,6 +81,41 @@ export class Studio {
       this._load(JSON.parse(before));
       throw error;
     }
+  }
+  /** Re-derive every non-authored figure pose and camera from the authored keys around it. */
+  _derive(doc) {
+    const keys = this._rows(doc).map(row => ({tick: row.start, frame: doc.keyframes[row.index]}));
+    const fill = (pick, isAuthored, assign) => {
+      const authored = keys.filter(key => pick(key.frame) && isAuthored(key.frame));
+      if (!authored.length) return;
+      for (const key of keys) {
+        const target = pick(key.frame);
+        if (!target || isAuthored(key.frame)) continue;
+        const next = authored.find(a => a.tick > key.tick), prev = authored.findLast(a => a.tick < key.tick);
+        const a = prev ?? next, b = next ?? prev;
+        const t = prev && next ? easedProgress(keyEasing(prev.frame), (key.tick - prev.tick) / (next.tick - prev.tick)) : 0;
+        assign(target, pick(a.frame), pick(b.frame), t, key.frame);
+      }
+    };
+    const uids = new Set(keys.flatMap(key => key.frame.objects.map(o => o.unique_id)));
+    for (const uid of uids) {
+      const pick = frame => frame.objects.find(o => o.unique_id === uid);
+      fill(pick, frame => Boolean(pick(frame)?.[AUTHORED]), (object, a, b, t) => {
+        object.root_x = a.root_x + (b.root_x - a.root_x) * t;
+        object.root_y = a.root_y + (b.root_y - a.root_y) * t;
+        object.scale = a.scale + (b.scale - a.scale) * t;
+        object.angles = a.angles.map((angle, i) => lerpAngle(angle, b.angles[i] ?? angle, t));
+        if (a.len_flag && a.lengths?.length) { object.len_flag = a.len_flag; object.lengths = a.lengths.map((l, i) => l + ((b.lengths?.[i] ?? l) - l) * t); }
+      });
+    }
+    fill(frame => frame.camera, frame => Boolean(frame._styk?.mcpCamera), (camera, a, b, t) => {
+      Object.assign(camera, {is_default: Boolean(a.is_default && b.is_default), x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t,
+        scale: a.scale + (b.scale - a.scale) * t, angle_rad: lerpAngle(a.angle_rad ?? 0, b.angle_rad ?? 0, t)});
+    });
+  }
+  _markCamera(frame, authored = true) {
+    frame._styk = {...frame._styk};
+    if (authored) frame._styk.mcpCamera = true; else delete frame._styk.mcpCamera;
   }
   undo(steps = 1) {
     let n = 0;
@@ -90,7 +134,7 @@ export class Studio {
     document.canvas_width = width; document.canvas_height = height; document.fps = fps;
     document.figure_types = [];
     document.backgrounds = [{background_id: 1, kind: 2, color: hexArgb(background), name: 'Background'}];
-    const first = {...createFrame([], 1), background_id: 1, _styk: {easing: {interpolation: 'linear'}}};
+    const first = {...createFrame([], 1), background_id: 1, _styk: {easing: {interpolation: 'linear'}, mcpCamera: true}};
     document.keyframes = [first];
     document._styk.name = name;
     this.undoStack = []; this.redoStack = [];
@@ -108,6 +152,8 @@ export class Studio {
     this.undoStack = []; this.redoStack = [];
     this._load(document, path.basename(file, ext));
     this._flattenLayerSheet();
+    // Every key of a file someone authored is meaningful: keep it exactly.
+    for (const frame of this.doc.keyframes) { this._markCamera(frame); for (const object of frame.objects) object[AUTHORED] = true; }
     return `opened ${path.basename(file)}: ${this._summaryLine()}`;
   }
   /** The MCP authors plain keyframes; drop an Advanced-timeline layer sheet by materializing its keys. */
@@ -160,16 +206,22 @@ export class Studio {
   _rows(doc) { return nativeTimeline(doc); }
   _total(doc) { const last = this._rows(doc).at(-1); return last ? last.start + last.count : 0; }
   _keyIndex(doc, tick) { return this._rows(doc).findIndex(row => row.start === tick); }
-  _frameFrom(source, base, duration) {
+  _frameFrom(source, base, duration, {authored = false} = {}) {
     const frame = {...clone({...base, objects: [], object_draw_order: [], object_draw_order_unique_ids: []}),
-      objects: source.objects.map(object => { const copy = snapshotPoseObject(object); for (const key of Object.keys(copy)) if (key.startsWith('_runtime') || key === '_movieclipSample') delete copy[key]; return copy; }),
+      objects: source.objects.map(object => {
+        const copy = snapshotPoseObject(object);
+        for (const key of Object.keys(copy)) if (key.startsWith('_runtime') || key === '_movieclipSample') delete copy[key];
+        if (authored) copy[AUTHORED] = true; else delete copy[AUTHORED];
+        return copy;
+      }),
       camera: clone(source.camera ?? base.camera), duration_raw: duration};
     frame.objects.forEach((o, i) => { o.object_slot = i; });
     const byUid = new Map(frame.objects.map((o, i) => [o.unique_id, i]));
     const order = (base.object_draw_order_unique_ids ?? []).filter(uid => byUid.has(uid));
     for (const o of frame.objects) if (!order.includes(o.unique_id)) order.push(o.unique_id);
     frame.object_draw_order_unique_ids = order; frame.object_draw_order = order.map(uid => byUid.get(uid));
-    if (frame._styk) { frame._styk = {...frame._styk}; delete frame._styk.frameId; }
+    frame._styk = {...frame._styk}; delete frame._styk.frameId;
+    if (authored) frame._styk.mcpCamera = true; else delete frame._styk.mcpCamera;
     return frame;
   }
   /** Ensure a keyframe starts exactly at tick, preserving the motion around it. Returns its index. */
@@ -216,8 +268,9 @@ export class Studio {
       if (action === 'copy') {
         if (!ticks.length || to === undefined) fail('copy needs frames:[source] and to:<frame>.');
         const source = this._sampled(doc, ticks[0]), target = this._ensureKey(doc, int(to, 'to') - 1);
-        const frame = doc.keyframes[target], copy = this._frameFrom(source, frame, frame.duration_raw);
+        const frame = doc.keyframes[target], copy = this._frameFrom(source, frame, frame.duration_raw, {authored: true});
         frame.objects = copy.objects; frame.camera = copy.camera; frame.object_draw_order = copy.object_draw_order; frame.object_draw_order_unique_ids = copy.object_draw_order_unique_ids;
+        this._markCamera(frame);
         return `copied f${frames[0]} -> f${to}`;
       }
       if (action === 'easing') {
@@ -321,6 +374,7 @@ export class Studio {
         if (row.start < first || row.start > last) continue;
         const object = createObject(figure, uid, px, py - anchor, {scale});
         if (pose) Object.assign(object, clone(pose));
+        if (row.start === first) object[AUTHORED] = true;
         doc.keyframes[row.index].objects.push(object);
         this._reorder(doc.keyframes[row.index]);
       }
@@ -386,7 +440,8 @@ export class Studio {
       const frames = args.frames ?? [args.frame ?? 1];
       for (const f of frames) {
         const index = this._ensureKey(doc, int(f, 'frame') - 1);
-        this._applyPose(figure, this._objectAt(doc, index, uid), args);
+        const object = this._objectAt(doc, index, uid);
+        this._applyPose(figure, object, args); object[AUTHORED] = true;
         if (args.easing) this._setEasing(doc, index, args.easing);
       }
       const object = this._objectAt(doc, this._keyIndex(doc, frames.at(-1) - 1), uid);
@@ -416,7 +471,7 @@ export class Studio {
       const upper = toTarget + side * inner;
       const elbow = {x: base.x + l1 * Math.cos(upper), y: base.y + l1 * Math.sin(upper)};
       const target = {x: base.x + d * Math.cos(toTarget), y: base.y + d * Math.sin(toTarget)};
-      object.angles[a] = upper; object.angles[b] = Math.atan2(target.y - elbow.y, target.x - elbow.x);
+      object.angles[a] = upper; object.angles[b] = Math.atan2(target.y - elbow.y, target.x - elbow.x); object[AUTHORED] = true;
       const hit = Math.hypot(target.x - tx - base.x, target.y - ty - base.y);
       return `${name} ${limb} f${frame} -> ${Math.round(target.x)},${Math.round(target.y)}${hit > 1 ? ` (out of reach by ${Math.round(hit)}px)` : ''}`;
     });
@@ -436,17 +491,15 @@ export class Studio {
         object.root_x = baseX + key.dx * scale;
         object.root_y = groundY - lowestOffset(figure, object) - key.lift * scale;
         this._setEasing(doc, index, params.easing ?? 'auto');
+        object[AUTHORED] = true;
         placed.set(tick, clone(object));
       }
-      // Foreign keys inside the move follow it, interpolated between its keys.
+      // The move owns its range: other keys of this figure inside it are re-derived from the move.
       const moveTicks = [...placed.keys()].sort((a, b) => a - b);
       for (const row of this._rows(doc)) {
         if (row.start <= startTick || row.start >= endTick || placed.has(row.start)) continue;
-        const object = this._objectAt(doc, row.index, uid, false); if (!object) continue;
-        const next = moveTicks.find(t => t > row.start), prev = [...moveTicks].reverse().find(t => t < row.start);
-        const a = placed.get(prev), b = placed.get(next), t = (row.start - prev) / (next - prev);
-        object.angles = a.angles.map((angle, i) => angle + Math.atan2(Math.sin(b.angles[i] - angle), Math.cos(b.angles[i] - angle)) * t);
-        object.root_x = a.root_x + (b.root_x - a.root_x) * t; object.root_y = a.root_y + (b.root_y - a.root_y) * t;
+        const object = this._objectAt(doc, row.index, uid, false);
+        if (object) delete object[AUTHORED];
       }
       // Later keys keep their poses but carry the move's displacement, so moves chain in any order.
       const final = placed.get(moveTicks.at(-1));
@@ -454,7 +507,7 @@ export class Studio {
         const shiftX = final.root_x - oldEnd.root_x, shiftY = final.root_y - oldEnd.root_y;
         for (const row of this._rows(doc)) if (row.start > endTick) {
           const object = this._objectAt(doc, row.index, uid, false);
-          if (object) { object.root_x += shiftX; object.root_y += shiftY; }
+          if (object?.[AUTHORED]) { object.root_x += shiftX; object.root_y += shiftY; }
         }
       }
       return `${name} ${move} f${start}-${endTick + 1} (${expanded.keys.length} keys), ends at ${this._anchorText(figure, final)}`;
@@ -473,6 +526,7 @@ export class Studio {
         if (zoom !== undefined) { if (!(zoom >= .05 && zoom <= 50)) fail('zoom must be 0.05-50.'); cam.scale = 1 / zoom; }
         if (rotation !== undefined) cam.angle_rad = rotation * Math.PI / 180;
         if (!reset) cam.is_default = false;
+        this._markCamera(doc.keyframes[index]);
         if (easing) this._setEasing(doc, index, easing);
       }
       const cam = doc.keyframes[this._keyIndex(doc, list.at(-1) - 1)].camera;
@@ -486,12 +540,20 @@ export class Studio {
       return this.mutate(doc => {
         let cx = x, cy = y;
         if (figure !== undefined) {
-          const {uid, figure: type} = this._figure(doc, figure);
-          const object = this._sampled(doc, startTick + ramp).objects.find(o => o.unique_id === uid) ?? fail('That figure is not present then.');
-          const [x0, y0, x1, y1] = bounds(type, object); cx ??= (x0 + x1) / 2; cy ??= (y0 + y1) / 2;
+          // Frame the figure's whole action during the hold, not just its first pose.
+          const {uid, figure: type} = this._figure(doc, figure), box = [Infinity, Infinity, -Infinity, -Infinity];
+          for (let tick = Math.min(startTick + ramp, endTick); tick <= endTick && tick < this._total(doc); tick++) {
+            const object = this._sampled(doc, tick).objects.find(o => o.unique_id === uid);
+            if (!object) continue;
+            const [x0, y0, x1, y1] = bounds(type, object);
+            box[0] = Math.min(box[0], x0); box[1] = Math.min(box[1], y0); box[2] = Math.max(box[2], x1); box[3] = Math.max(box[3], y1);
+          }
+          if (!Number.isFinite(box[0])) fail('That figure is not present then.');
+          cx ??= (box[0] + box[2]) / 2; cy ??= (box[1] + box[3]) / 2;
         }
         const before = clone(this._sampled(doc, startTick).camera);
-        const set = (tick, cam) => { const i = this._ensureKey(doc, tick); doc.keyframes[i].camera = cam; return i; };
+        const set = (tick, cam) => { const i = this._ensureKey(doc, tick); doc.keyframes[i].camera = cam; this._markCamera(doc.keyframes[i]); return i; };
+        for (const row of this._rows(doc)) if (row.start > startTick && row.start < endTick) this._markCamera(doc.keyframes[row.index], false);
         const zoomed = {is_default: false, x: (cx ?? doc.canvas_width / 2) - doc.canvas_width / 2, y: (cy ?? doc.canvas_height / 2) - doc.canvas_height / 2, scale: 1 / zoom, angle_rad: before.angle_rad ?? 0};
         this._setEasing(doc, set(startTick, {...before}), 'ease-out');
         set(Math.min(startTick + ramp, endTick), {...zoomed});

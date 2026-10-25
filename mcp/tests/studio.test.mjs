@@ -172,3 +172,24 @@ test('describe stays compact', async () => {
   assert.ok(text.length < 600, `${text.length} chars`);
   assert.match(text, /hero \(uid 2, stick, #0d99ff\)/);
 });
+
+test('figures and the camera keep independent keys', async () => {
+  const s = await studio();
+  await s.addFigure({preset: 'ball', name: 'ball', x: 600, y: 400});
+  s.pose({figure: 'ball', frame: 20, dy: -100});
+  s.pose({figure: 'hero', frame: 41, x: 500, easing: 'linear'});
+  s.keys({action: 'easing', frames: [1], easing: 'linear'});
+  // The ball's key at frame 20 does not stall the hero's walk from frame 1 to 41.
+  close(hero(s, 19).object.root_x, 300 + 200 * 19 / 40, 1e-6);
+  s.camera({frame: 1, zoom: 1, easing: 'linear'}); s.camera({frame: 41, zoom: 2});
+  const scale = tick => hero(s, tick).frame.camera.scale;
+  close(1 / scale(0), 1, 1e-9); close(scale(19), 1 + (0.5 - 1) * 19 / 40, 1e-9); close(1 / scale(40), 2, 1e-9);
+});
+
+test('punch_in holds its zoom across keys made by other tools', async () => {
+  const s = await studio();
+  s.move({figure: 'hero', move: 'jump_kick', start: 5});
+  s.cameraFx({preset: 'punch_in', start: 10, end: 30, figure: 'hero', zoom: 1.6, ramp: 3});
+  for (const tick of [13, 16, 20, 25, 28]) close(1 / hero(s, tick).frame.camera.scale, 1.6, 1e-6);
+  close(1 / hero(s, 29).frame.camera.scale, 1, 1e-6);
+});

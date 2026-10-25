@@ -85,8 +85,28 @@ for (const ext of ['piv', 'styk']) {
   assert.match(back.text, /480x270 12fps 24f/, ext);
   assert.match((await call('scene_describe', {})).text, /pivoter \(uid 1, stick, #ffd23c\)/, ext);
 }
+// 5. The target workflow: "a 3-second jump kick with a camera punch-in, export MP4".
+const typical = report.length;
+await call('help', {topic: 'basics'});
+await call('help', {topic: 'moves'});
+const clip = await call('batch', {ops: [
+  {tool: 'project_new', args: {frames: 72}},
+  {tool: 'figure_add', args: {preset: 'ground', name: 'floor', y: 440}},
+  {tool: 'figure_add', args: {preset: 'stick', name: 'hero', x: 260, y: 440}},
+  {tool: 'move_apply', args: {figure: 'hero', move: 'jump_kick', start: 12}},
+  {tool: 'camera_fx', args: {preset: 'punch_in', start: 24, end: 44, figure: 'hero', zoom: 1.6}},
+  {tool: 'camera_fx', args: {preset: 'impact', start: 26}},
+  {tool: 'export', args: {path: 'clips/jump-kick.mp4'}},
+]});
+console.log(clip.text);
+await call('preview', {count: 8});
+const kick = await probe(path.join(workdir, 'clips', 'jump-kick.mp4'));
+assert.equal(kick.frames, 72); assert.ok(Math.abs(kick.duration - 3) < .05);
+const scenario = report.slice(typical);
 await client.close();
 
+const scenarioText = scenario.reduce((n, r) => n + (r.images ? 0 : r.chars), 0);
+console.log(`3-second jump kick: ${scenario.length} tool calls, ${scenarioText} chars of text output (+1 preview image); mp4 ${JSON.stringify(kick)}`);
 const total = report.reduce((n, r) => n + r.chars, 0), textOnly = report.reduce((n, r) => n + (r.images ? 0 : r.chars), 0);
 console.table(report);
 console.log(`tool calls: ${report.length}; response chars: ${total} (text ${textOnly}, preview image base64 ${total - textOnly}); tool list: ${tools.length} tools, ${toolListChars} chars`);
