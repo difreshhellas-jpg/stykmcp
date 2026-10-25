@@ -26,7 +26,10 @@ export function encodeVideo({format, file, fps, frames}) {
     child.on('close', code => { if (!failed) code === 0 ? resolve() : reject(new Error(`ffmpeg failed (${code}): ${stderr.trim().split('\n').slice(-3).join(' ')}`)); });
     child.stdin.on('error', () => {});
     (async () => {
-      for await (const frame of frames) if (!child.stdin.write(frame)) await new Promise(r => child.stdin.once('drain', r));
+      for await (const frame of frames) {
+        if (failed || child.exitCode !== null) break; // ffmpeg is gone: stop rendering frames nobody reads
+        if (!child.stdin.write(frame)) await new Promise(r => { child.stdin.once('drain', r); child.once('close', r); });
+      }
       child.stdin.end();
     })().catch(error => { child.kill(); reject(error); });
   });

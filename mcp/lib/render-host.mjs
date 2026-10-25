@@ -33,6 +33,11 @@ async function launchBrowser() {
   throw new Error(`No headless browser could start. Run "npx playwright install chromium" (or install Edge/Chrome). ${attempts.join(' | ')}`);
 }
 
+/** Page errors reach the agent as one plain sentence, without Playwright's prefix or a stack. */
+const evaluate = (page, fn, arg) => page.evaluate(fn, arg).catch(error => {
+  throw new Error(String(error.message).replace(/^page\.evaluate:\s*/, '').replace(/^Error:\s*/, '').split('\n')[0]);
+});
+
 export class RenderHost {
   constructor({log = () => {}} = {}) { this.log = log; this.revision = null; this.codecError = null; }
   /** The loopback origin: the codec service when possible, else the static host. */
@@ -72,7 +77,7 @@ export class RenderHost {
   async _sync(report, revision) {
     const page = await this._page();
     if (this.revision !== revision || revision === undefined) {
-      await page.evaluate(json => window.__stykMcp.setDocument(json), JSON.stringify(report));
+      await evaluate(page, json => window.__stykMcp.setDocument(json), JSON.stringify(report));
       this.revision = revision;
     }
     return page;
@@ -80,12 +85,12 @@ export class RenderHost {
   /** Render ticks to PNG Buffers at width x height. */
   async frames(report, revision, {ticks, width, height, smoothing = 'edges', alpha = false}) {
     const page = await this._sync(report, revision);
-    const encoded = await page.evaluate(options => window.__stykMcp.frames(options), {ticks, width, height, smoothing, alpha});
+    const encoded = await evaluate(page, options => window.__stykMcp.frames(options), {ticks, width, height, smoothing, alpha});
     return encoded.map(text => Buffer.from(text, 'base64'));
   }
   async sheet(report, revision, options) {
     const page = await this._sync(report, revision);
-    return Buffer.from(await page.evaluate(value => window.__stykMcp.sheet(value), options), 'base64');
+    return Buffer.from(await evaluate(page, value => window.__stykMcp.sheet(value), options), 'base64');
   }
   async _codec() {
     await this._origin();
@@ -95,7 +100,7 @@ export class RenderHost {
   async save(report, revision, {format, name, figureTypeId}) {
     await this._codec();
     const page = await this._sync(report, revision);
-    return Buffer.from(await page.evaluate(options => window.__stykMcp.save(options),
+    return Buffer.from(await evaluate(page, options => window.__stykMcp.save(options),
       {format, name, figureTypeId, codecOrigin: this.origin, token: this.token}), 'base64');
   }
   /** Decode a .piv/.stk/.styk/.json file into a document. */

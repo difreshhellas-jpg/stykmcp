@@ -635,7 +635,8 @@ export class Studio {
     const cam = sampled.camera;
     if (cam && !cam.is_default) lines.push(`camera@f${tick + 1}: center ${Math.round(cam.x + doc.canvas_width / 2)},${Math.round(cam.y + doc.canvas_height / 2)} zoom ${r1(1 / cam.scale)}`);
     for (const c of doc._styk?.cameraMotion?.clips ?? []) lines.push(`fx ${c.id}: camera ${c.type} f${c.start + 1}-${c.start + c.duration}`);
-    for (const c of doc._styk?.vfxClips?.clips ?? []) lines.push(`fx ${c.id}: ${c.effects.map(e => e.type).join('+')} on ${c.target.kind === 'scene' ? 'scene' : c.target.uid} f${c.start + 1}-${c.duration === null ? 'end' : c.start + c.duration}`);
+    const nameOf = uid => { const object = doc.keyframes.flatMap(k => k.objects).find(o => o.unique_id === uid); return object ? this._name(doc, object) : uid; };
+    for (const c of doc._styk?.vfxClips?.clips ?? []) lines.push(`fx ${c.id}: ${c.effects.map(e => e.type).join('+')} on ${c.target.kind === 'scene' ? 'scene' : nameOf(c.target.uid)} f${c.start + 1}-${c.duration === null ? 'end' : c.start + c.duration}`);
     lines.push(`undo ${this.undoStack.length}, redo ${this.redoStack.length}`);
     return lines.join('\n');
   }

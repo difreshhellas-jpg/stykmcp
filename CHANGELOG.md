@@ -8,6 +8,7 @@ What's new in each version of StykAnimate.
 
 ### Added
 
+- StykMCP: an MCP server so AI assistants such as Claude can create, preview and export stick-figure animations.
 - StykAnimate is now open source: its code is on GitHub under the GPL-3.0 license.
 - Everyday Props · Pivot 3D: 30 editable everyday objects with working hinges and wheels for your animations.
 - Vehicles · Pivot 3D asset pack with twelve editable vehicles, spinning wheels, steering and opening parts.

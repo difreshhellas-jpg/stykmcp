@@ -98,19 +98,75 @@ Telemetry is consent-gated and travels only through the Electron desktop bridge
 the MCP server uses loads neither `app.mjs` nor the desktop bridge, so it cannot send anything.
 As a second guard, the MCP browser context aborts every request that is not to its own loopback origin.
 
-## Architecture (proposed; confirmed in Phase 1)
+## Phase 1: headless feasibility (verified)
 
-**A, with an Editor in Node.**
+| Question | Result |
+| --- | --- |
+| Document model and commands in plain Node, no DOM? | Yes. `new Editor({demo:false})`, `load()`, `evaluatedFrame`, `buildGeometry`, the validators, camera-motion and VFX factories all run in Node. |
+| Renderer/exporter in headless Chromium? | Yes. A minimal page imports `src/export-frame-renderer.mjs`; its worker rasterizes with Canvas 2D on OffscreenCanvas. It works with `--disable-gpu`, so no WebGPU, Vulkan, ANGLE or SwiftShader flags are needed. (The full editor also boots headless; with `--enable-unsafe-webgpu --use-angle=swiftshader --use-vulkan=swiftshader` it gets a software adapter and switches to its compatibility renderer.) |
+| Non-WebGPU render path? | Export itself is the CPU path: Canvas 2D for PNG/video frames, `svg-export.mjs` for SVG. Previews use the same path. |
+| How does MP4/GIF export work, and can it be called? | `renderNativeTick(tick)` returns one PNG Blob per output frame (one tick = one frame). The desktop app pipes these through IPC to its bundled FFmpeg; the browser uses WebCodecs plus local muxers. The MCP server pipes the same PNGs into the system `ffmpeg` (H.264 MP4, VP9 WebM with alpha, palette GIF). |
+| Saving and opening? | `DocumentExporter` in the page writes `.styk` (built in its worker) and `.piv`/`.stk` (through the codec service's `POST /api/export`, after the app's own Pivot materialization). Node opens files with `POST /api/import`. |
 
-- The Node MCP server owns an `Editor` instance in-process (no DOM), so authoring tools are
-  synchronous, cheap and undoable.
-- For preview and export it lazily starts the existing Python service (which also serves the
-  app's static files) and one headless Chromium page on that origin. The page imports
-  `src/export-frame-renderer.mjs` only, receives the document, and returns PNG frames.
-- Node pipes the frames into the system `ffmpeg` (mp4, webm, gif) or writes PNGs to disk.
-  Contact sheets are composed in the page with Canvas 2D.
-- `.piv`/`.stk`/`.styk` open and save go through the same Python service.
+Spike evidence (this container): a 13-frame 640x360 clip rendered in about 0.5 s, encoded to H.264,
+and ffprobe reported `640x360, 24/1, 13 frames, 0.5417 s`. `.piv` (291 bytes), `.styk` (1.5 KB) and
+`.stk` round trips reopened with matching content. Tick-by-tick pixel centroids matched `evaluatedFrame`.
 
-Why not B (drive the whole editor UI)? It boots the full app (more failure modes) and
-every edit would cross the browser bridge. Export needs no GPU, so A needs only the parts
-that rasterize.
+## Architecture (chosen)
+
+**A: the Node MCP server owns the document, and a headless browser page only rasterizes and saves.**
+
+```
+Claude ──stdio──> mcp/server.mjs ── tools.mjs (zod schemas, batch)
+                                     └─ studio.mjs: Editor (Node, no DOM) + snapshot undo
+                                          ├─ figures.mjs / moves.mjs: presets, FK, IK, preset moves
+                                          └─ render-host.mjs ──> codec service (backend/server.py, loopback + token)
+                                                              └─> headless Chromium: mcp/render/page.mjs
+                                                                   (ExportFrameRenderer, DocumentExporter)
+                                     encode.mjs ──> system ffmpeg (mp4, webm, gif)
+```
+
+Why A rather than B (driving the whole editor UI through `window.__stykMcp`)? Authoring is plain
+data plus the app's evaluator, so it runs in Node at about 1–20 ms per tool call and has no UI or GPU
+failure modes. The browser starts lazily, only for pixels and native saves, and loads two modules
+rather than the app shell, so telemetry, update checks and the GPU are never involved. B would boot
+the full editor (WebGPU startup, panels, autosave and recovery) and push every edit across a bridge.
+
+Decisions:
+
+- **Timeline model.** The tools author the plain keyframe list (Simple timeline), with no layer sheet.
+  Pivot keys are global, so the tool layer marks the keys each tool authored per figure
+  (`object._mcpKey`) and for the camera (`frame._styk.mcpCamera`). After every edit it re-derives the
+  other keys from their authored neighbours using the outgoing key's easing (`easedProgress`). Channels
+  therefore never freeze each other, and the file stays an ordinary Pivot-compatible document.
+- **Undo.** One snapshot per tool call (and per `batch`), bounded to 60. The editor's own
+  frame-scoped history is not used for these whole-document operations.
+- **Validation.** zod at the tool boundary; `validateScene`, `validateVfxClips` and
+  `validateCameraMotion` plus `Editor.load` after every operation. Failures roll back and return one
+  actionable sentence; batch errors include the expected signature.
+- **Pose convention.** Absolute bone directions in degrees (0 down, 90 right). Moves place each key
+  with forward kinematics so the lowest joint stays on the ground; FK is checked against `buildGeometry`.
+- **Fallbacks.** No Python: a small Node static host (`mcp/lib/static-server.mjs`) serves the page, and only `.styk/.piv/.stk`
+  are unavailable. No ffmpeg: PNG sequences still export. Browser: Playwright Chromium, then Edge, then Chrome.
+
+## Phase 3: verification
+
+| Check | Command | Result (this container) |
+| --- | --- | --- |
+| Tool-layer unit tests | `npm run test:mcp` (also part of `npm test`) | 18 pass |
+| MCP over stdio: 2-second jump to MP4, `.piv` round trip, 3-second jump kick | `npm run test:mcp:smoke` | pass; ffprobe `640x360, 24 fps, 48 frames, 2.0 s` and `960x540, 24 fps, 72 frames, 3.0 s`; GIF `480x270, 12 fps, 24 frames` |
+| Existing checks | `npm run check`, `npm test`, Python unittest | pass, except one pre-existing Node 22/ICU plural-order test (fails identically without this fork) |
+| Claude Code registration | `claude mcp add stykmcp -- node …/mcp/server.mjs`, then `claude mcp list` | `stykmcp … √ Connected` |
+| Real agent, prompt "3-second jump kick with camera punch-in, export MP4" | `claude -p … --model sonnet` | 2 server calls (`help basics`, then one `batch` ending with `export`), 2,723 chars of tool output, valid 3.0 s MP4 (960x540, 24 fps, 72 frames). An earlier version without signatures in `help` took 6 calls, 2 of them failed batches |
+
+Token cost, measured by the smoke test (characters of tool output):
+
+| Workload | Calls | Text output | Images |
+| --- | --- | --- | --- |
+| 2-second jump: batch, describe, preview, export, undo | 5 | 688 chars | one 480 px contact sheet |
+| 3-second jump kick: help basics, help moves, batch with export, preview | 4 | 4,024 chars (help is 3,672 of it) | one 640 px contact sheet |
+| Real agent run: help basics, batch with export | 2 | 2,723 chars | none |
+| Tool list (sent once per session) | – | about 13,400 chars for 22 tools | – |
+
+A contact sheet is billed as image tokens by its pixel size (a 640x~330 sheet is roughly 300
+tokens), not by its base64 length.

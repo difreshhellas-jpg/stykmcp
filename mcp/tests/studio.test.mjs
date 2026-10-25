@@ -162,7 +162,7 @@ test('camera fx and effects use the app clip validators', async () => {
   assert.throws(() => s.cameraFx({preset: 'shake', start: 1, params: {wobbliness: 2}}), /shake params: /);
   const id = s.doc._styk.cameraMotion.clips[0].id;
   assert.match(s.removeFx({id}), /removed/);
-  assert.match(s.describe({}), /glow on 2 f1-10/);
+  assert.match(s.describe({}), /glow on hero f1-10/);
 });
 
 test('describe stays compact', async () => {
