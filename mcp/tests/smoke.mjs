@@ -1,9 +1,10 @@
 // Headless smoke test through the real MCP server over stdio, using only tool calls:
-// a 2-second jump clip exported to MP4, verified with ffprobe. Reports the size of
-// every tool response (the agent's token cost) and of the tool list itself.
+// a 2-second jump clip exported to MP4 and verified with ffprobe, then a .piv
+// round trip (open, edit, export GIF, save .piv/.styk, reopen). Reports the size
+// of every tool response (the agent's token cost) and of the tool list itself.
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {mkdtempSync, existsSync, writeFileSync, mkdirSync} from 'node:fs';
+import {mkdtempSync, existsSync, writeFileSync, mkdirSync, copyFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -62,6 +63,28 @@ assert.ok(Math.abs(info.duration - 2) < .05, `duration ${info.duration}`);
 // 3. Undo works across the batch as one step.
 const undone = await call('undo', {});
 assert.match(undone.text, /undid 1/);
+
+// 4. Round trip: open a Pivot .piv fixture, modify it, export, save and reopen.
+copyFileSync(path.join(root, 'mcp', 'tests', 'fixtures', 'hop.piv'), path.join(workdir, 'hop.piv'));
+const opened = await call('project_open', {path: 'hop.piv'});
+assert.match(opened.text, /480x270 12fps 12f/);
+const edited = await call('batch', {ops: [
+  {tool: 'project_set', args: {frames: 24, background: '#202830'}},
+  {tool: 'move_apply', args: {figure: 'pivoter', move: 'wave', start: 13, frames: 12}},
+  {tool: 'figure_update', args: {figure: 'pivoter', color: '#ffd23c'}},
+  {tool: 'project_save', args: {path: 'roundtrip/hop-edit.piv'}},
+  {tool: 'project_save', args: {path: 'roundtrip/hop-edit.styk'}},
+]});
+console.log(edited.text);
+const gif = await call('export', {path: 'roundtrip/hop-edit.gif'});
+const gifInfo = await probe(path.join(workdir, 'roundtrip', 'hop-edit.gif'));
+console.log(gif.text, JSON.stringify(gifInfo));
+assert.equal(gifInfo.frames, 24); assert.equal(gifInfo.width, 480);
+for (const ext of ['piv', 'styk']) {
+  const back = await call('project_open', {path: `roundtrip/hop-edit.${ext}`});
+  assert.match(back.text, /480x270 12fps 24f/, ext);
+  assert.match((await call('scene_describe', {})).text, /pivoter \(uid 1, stick, #ffd23c\)/, ext);
+}
 await client.close();
 
 const total = report.reduce((n, r) => n + r.chars, 0), textOnly = report.reduce((n, r) => n + (r.images ? 0 : r.chars), 0);

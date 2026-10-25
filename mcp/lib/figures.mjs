@@ -80,10 +80,10 @@ export function bounds(figure, object) {
   return [x0 - pad, y0 - pad, x1 + pad, y1 + pad].map(Math.round);
 }
 
-/** Standing height of the origin above the feet: the anchor offset for stick figures. */
+/** Height of the origin above the feet in the standing pose: the anchor offset for stick figures. */
 export function anchorOffset(figure) {
   if (!isStick(figure)) return 0;
-  return figure.segments[6].length + figure.segments[7].length;
+  return lowestOffset(figure, {root_x: 0, root_y: 0, scale: 1, angles: STICK_BONES.map(bone => toNative(STAND[bone]))});
 }
 
 const segment = (id, parent, length, angle, thickness, color, extra = {}) => ({

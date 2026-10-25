@@ -1,16 +1,16 @@
 {
-  "name": "stykanimate-webapp",
-  "productName": "StykAnimate",
+  "name": "stykmcp",
+  "productName": "StykMCP",
   "version": "1.2.5",
-  "description": "A WebGPU desktop workspace for Pivot animation and stick figures.",
+  "description": "StykMCP: an independent fork of StykAnimate with an MCP server for AI-driven stick-figure animation. Not endorsed by the StykAnimate author.",
   "license": "GPL-3.0-or-later",
-  "homepage": "https://stykanimate.com",
+  "homepage": "https://github.com/difreshhellas-jpg/stykmcp",
   "repository": {
     "type": "git",
-    "url": "https://github.com/filippocalippo/StykAnimate-App.git"
+    "url": "https://github.com/difreshhellas-jpg/stykmcp.git"
   },
   "bugs": {
-    "url": "https://github.com/filippocalippo/StykAnimate-App/issues"
+    "url": "https://github.com/difreshhellas-jpg/stykmcp/issues"
   },
   "private": true,
   "type": "module",
@@ -21,14 +21,14 @@
     "dev": "electron .",
     "serve": "node scripts/serve.mjs",
     "mcp": "node mcp/server.mjs",
-    "test:mcp": "node --test mcp/test/",
-    "test:mcp:smoke": "node mcp/test/smoke.mjs",
+    "test:mcp": "node --test mcp/tests/*.test.mjs",
+    "test:mcp:smoke": "node mcp/tests/smoke.mjs",
     "check": "node scripts/check.mjs",
     "locales:build": "node scripts/build-locales.mjs",
     "locales:check": "node scripts/build-locales.mjs --check",
     "locales:validate": "node scripts/build-locales.mjs --validate-only",
     "test:localization:browser": "node tests/localization-settings.browser.mjs && node tests/localization-app.browser.mjs && node tests/localization-native-app.browser.mjs && node tests/localization-foundation.browser.mjs && node tests/localization-packs.browser.mjs",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --test tests/*.test.mjs mcp/tests/*.test.mjs",
     "test:hotkeys": "node --test tests/hotkeys.test.mjs",
     "test:hotkeys:ui": "node tests/hotkeys-timeline.browser.mjs",
     "test:hotkeys:desktop": "node scripts/smoke-hotkeys.mjs",

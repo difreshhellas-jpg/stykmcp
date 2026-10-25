@@ -108,7 +108,7 @@ export const MOVES = {
     build: () => [{t: 0, pose: {}}, {t: 1, pose: {torso: 160, head: 168, thigh_l: 70, shin_l: -30, thigh_r: 60, shin_r: -35, arm_l: 50, forearm_l: 80, arm_r: 30, forearm_r: 60}}]},
 };
 
-/** Expand a move into absolute key poses: [{offset, pose, dx, lift}] with frame offsets from start. */
+/** Expand a move into key poses [{offset, pose, dx, lift}]; offsets run 0..duration-1 from the start frame. */
 export function expandMove(name, params = {}) {
   const move = MOVES[name];
   if (!move) throw new Error(`Unknown move "${name}". Moves: ${Object.keys(MOVES).join(', ')}`);
@@ -120,7 +120,8 @@ export function expandMove(name, params = {}) {
   const mirror = p.direction === 'left' ? -1 : 1;
   const seen = new Map();
   for (const key of move.build(p)) {
-    const offset = Math.round(key.t * duration);
+    // A move of N frames covers start .. start+N-1.
+    const offset = Math.round(key.t * (duration - 1));
     const pose = {};
     for (const [bone, stand] of Object.entries(STAND)) {
       const target = key.pose[bone] ?? stand, delta = wrap(target - stand) * intensity;

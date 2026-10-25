@@ -425,7 +425,7 @@ export class Studio {
     return this.mutate(doc => {
       const {uid, figure, name} = this._figure(doc, ref);
       if (!isStick(figure)) fail(`Moves need a stick-topology figure (${name} is not).`);
-      const expanded = expandMove(move, params), startTick = int(start, 'start') - 1, endTick = startTick + expanded.duration;
+      const expanded = expandMove(move, params), startTick = int(start, 'start') - 1, endTick = startTick + expanded.duration - 1;
       const before = this._sampled(doc, startTick).objects.find(o => o.unique_id === uid) ?? fail(`${name} is not present at frame ${start}.`);
       const groundY = before.root_y + lowestOffset(figure, before), baseX = before.root_x, scale = before.scale ?? 1;
       const oldEnd = endTick < this._total(doc) ? this._sampled(doc, endTick).objects.find(o => o.unique_id === uid) : null;
@@ -550,7 +550,7 @@ export class Studio {
 
   // ---------- reading ----------
   _summaryLine() {
-    const doc = this.doc, n = this.totalFrames, bg = doc.backgrounds?.find(b => b.background_id === doc.keyframes[0].background_id);
+    const doc = this.doc, n = this._total(doc), bg = doc.backgrounds?.find(b => b.background_id === doc.keyframes[0].background_id);
     return `${doc.canvas_width}x${doc.canvas_height} ${doc.fps}fps ${n}f (${r1(n / doc.fps)}s), ${doc.keyframes.length} keys, ${doc.keyframes[0].objects.length} figures${bg?.kind === 2 ? `, bg #${(bg.color & 0xffffff).toString(16).padStart(6, '0')}` : ''}`;
   }
   describe({frame, poses = false} = {}) {

@@ -57,7 +57,7 @@ export async function buildBrandAssets() {
   await writeFile(path.join(output, 'stykanimate-1024.png'), rendered.get(1024).png);
   await copyFile(source, path.join(root, 'mark.svg'));
   await copyFile(path.join(root, 'assets/brand/svg/stykanimate-symbol-blue.svg'), path.join(root, 'symbol.svg'));
-  await writeFile(path.join(output, 'brand-manifest.json'), JSON.stringify({source: 'assets/brand/svg/stykanimate-app-icon-blue.svg', sourceSHA256: createHash('sha256').update(svg).digest('hex'), color: '#0D99FF', transparentCorners: true, icoSizes, icnsSizes: [16, 32, 64, 128, 256, 512, 1024]}, null, 2) + '\n');
+  await writeFile(path.join(output, 'brand-manifest.json'), JSON.stringify({source: 'assets/brand/svg/stykanimate-app-icon-blue.svg', sourceSHA256: createHash('sha256').update(svg).digest('hex'), color: '#FF6B2C', transparentCorners: true, icoSizes, icnsSizes: [16, 32, 64, 128, 256, 512, 1024]}, null, 2) + '\n');
   console.log(`Generated Gesture PNG, ICO (${icoSizes.join(', ')}px), and ICNS; transparent alpha verified.`);
 }
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) await buildBrandAssets();
