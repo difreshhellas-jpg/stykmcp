@@ -94,17 +94,23 @@ export class RenderHost {
   }
   async _codec() {
     await this._origin();
-    if (!this.backend) throw new Error(this.codecError || 'The local codec service is unavailable (Python 3.10+ is required for .piv/.stk/.styk files).');
+    if (!this.backend) throw new Error(this.codecError || 'The local codec service is unavailable (Python 3.10+ is required for .piv/.stk files).');
   }
-  /** Encode the document as styk, piv or stk; returns a Buffer. */
+  /** Encode the document as styk, piv or stk; returns a Buffer. Only Pivot formats need the codec service. */
   async save(report, revision, {format, name, figureTypeId}) {
-    await this._codec();
+    if (format !== 'styk') await this._codec();
     const page = await this._sync(report, revision);
     return Buffer.from(await evaluate(page, options => window.__stykMcp.save(options),
       {format, name, figureTypeId, codecOrigin: this.origin, token: this.token}), 'base64');
   }
-  /** Decode a .piv/.stk/.styk/.json file into a document. */
+  /** Decode a file into {document}. Native StykAnimate files decode in the page like the app does;
+   * Pivot .piv/.stk go through the codec service. */
   async open(bytes, filename) {
+    const kind = path.extname(filename).slice(1).toLowerCase();
+    if (['styk', 'stkz', 'stykmov'].includes(kind)) {
+      const page = await this._page();
+      return {document: JSON.parse(await evaluate(page, options => window.__stykMcp.open(options), {base64: Buffer.from(bytes).toString('base64'), kind}))};
+    }
     await this._codec();
     const response = await fetch(`${this.origin}/api/import?filename=${encodeURIComponent(filename)}`, {
       method: 'POST', body: bytes, headers: {Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/octet-stream'}});

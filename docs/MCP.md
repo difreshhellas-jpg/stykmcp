@@ -31,8 +31,8 @@ npm run test:mcp                     # unit tests, no browser needed
 npm run test:mcp:smoke               # end to end: MP4 + .piv round trip, prints token cost
 ```
 
-Python is used only for opening and saving `.styk`, `.piv` and `.stk` files (it runs the app's own
-local codec). Previews, MP4/WebM/GIF/PNG export and `.json` saves work without it.
+Python is used only for opening and saving Pivot `.piv` and `.stk` files (it runs the app's own
+local codec). Native `.styk` files, previews, MP4/WebM/GIF/PNG export and `.json` work without it.
 
 ## Run and register
 
@@ -77,7 +77,7 @@ folder), never the client's working directory. Environment variables:
 | `STYKMCP_WORKDIR` | Folder for relative paths (default `~/StykMCP`) |
 | `STYKMCP_BROWSER` | `chromium`, `msedge`, `chrome`, or a browser executable path |
 | `STYKMCP_FFMPEG`, `STYKMCP_FFPROBE` | Full paths when ffmpeg is not on `PATH` |
-| `STYKMCP_NO_CODEC=1` | Never start the Python codec (no `.styk`/`.piv`/`.stk`) |
+| `STYKMCP_NO_CODEC=1` | Never start the Python codec (no `.piv`/`.stk`) |
 | `STYKMCP_LOG_SIZES=1` | Log each tool response size to stderr |
 | `STYK_PYTHON` | Python interpreter for the codec |
 
@@ -167,7 +167,7 @@ and returns its path.
 | --- | --- |
 | `No headless browser could start` | Run `npx playwright install chromium`, or set `STYKMCP_BROWSER=msedge` (Windows) / `chrome`. |
 | `ffmpeg was not found` | Install ffmpeg (see Install), open a new terminal/restart Claude, or set `STYKMCP_FFMPEG`/`STYKMCP_FFPROBE`. PNG export still works. |
-| `The local codec service ... could not start` | Install Python 3.11+ (`py -3 --version` on Windows) or set `STYK_PYTHON`. Needed only for `.styk/.piv/.stk`. |
+| `The local codec service ... could not start` | Install Python 3.11+ (`py -3 --version` on Windows) or set `STYK_PYTHON`. Needed only for `.piv/.stk`. |
 | GPU or WebGPU errors | The server never uses the GPU (`--disable-gpu`; export is Canvas 2D). Errors mentioning WebGPU come from the desktop editor, not StykMCP. |
 | Claude Desktop shows the server as failed | Check the paths in the JSON (double backslashes), use the full path to `node.exe`, and read the logs (Settings → Developer). The server logs to stderr only. |
 | First preview takes a few seconds | The browser and codec start lazily on the first preview/export/save; later calls are fast. |

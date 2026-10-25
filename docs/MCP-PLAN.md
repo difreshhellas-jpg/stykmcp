@@ -106,7 +106,7 @@ As a second guard, the MCP browser context aborts every request that is not to i
 | Renderer/exporter in headless Chromium? | Yes. A minimal page imports `src/export-frame-renderer.mjs`; its worker rasterizes with Canvas 2D on OffscreenCanvas. It works with `--disable-gpu`, so no WebGPU, Vulkan, ANGLE or SwiftShader flags are needed. (The full editor also boots headless; with `--enable-unsafe-webgpu --use-angle=swiftshader --use-vulkan=swiftshader` it gets a software adapter and switches to its compatibility renderer.) |
 | Non-WebGPU render path? | Export itself is the CPU path: Canvas 2D for PNG/video frames, `svg-export.mjs` for SVG. Previews use the same path. |
 | How does MP4/GIF export work, and can it be called? | `renderNativeTick(tick)` returns one PNG Blob per output frame (one tick = one frame). The desktop app pipes these through IPC to its bundled FFmpeg; the browser uses WebCodecs plus local muxers. The MCP server pipes the same PNGs into the system `ffmpeg` (H.264 MP4, VP9 WebM with alpha, palette GIF). |
-| Saving and opening? | `DocumentExporter` in the page writes `.styk` (built in its worker) and `.piv`/`.stk` (through the codec service's `POST /api/export`, after the app's own Pivot materialization). Node opens files with `POST /api/import`. |
+| Saving and opening? | `DocumentExporter` in the page writes `.styk` (built in its worker) and `.piv`/`.stk` (through the codec service's `POST /api/export`, after the app's own Pivot materialization). Native `.styk`/`.stkz` open in the page with the app's own `decodeDocument` (bundled WebAssembly zstd); Pivot files open with `POST /api/import`. |
 
 Spike evidence (this container): a 13-frame 640x360 clip rendered in about 0.5 s, encoded to H.264,
 and ffprobe reported `640x360, 24/1, 13 frames, 0.5417 s`. `.piv` (291 bytes), `.styk` (1.5 KB) and
@@ -146,8 +146,8 @@ Decisions:
   actionable sentence; batch errors include the expected signature.
 - **Pose convention.** Absolute bone directions in degrees (0 down, 90 right). Moves place each key
   with forward kinematics so the lowest joint stays on the ground; FK is checked against `buildGeometry`.
-- **Fallbacks.** No Python: a small Node static host (`mcp/lib/static-server.mjs`) serves the page, and only `.styk/.piv/.stk`
-  are unavailable. No ffmpeg: PNG sequences still export. Browser: Playwright Chromium, then Edge, then Chrome.
+- **Fallbacks.** No Python: a small Node static host (`mcp/lib/static-server.mjs`) serves the page, and only `.piv/.stk`
+  are unavailable (`.styk` opens and saves in the page, as in the app). No ffmpeg: PNG sequences still export. Browser: Playwright Chromium, then Edge, then Chrome.
 
 ## Phase 3: verification
 

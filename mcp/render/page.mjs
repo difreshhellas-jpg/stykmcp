@@ -3,6 +3,7 @@
 // File → Export output exactly. Node drives it through window.__stykMcp.
 import {ExportFrameRenderer} from '../../src/export-frame-renderer.mjs';
 import {DocumentExporter} from '../../src/document-export.mjs';
+import {decodeDocument, normalizeDecodedDocument, verifyEmbeddedSource} from '../../src/native-container.mjs';
 
 let session = null;
 
@@ -29,6 +30,13 @@ window.__stykMcp = {
   async save({format, name, figureTypeId, codecOrigin, token}) {
     exporter ??= new DocumentExporter({baseURL: codecOrigin, token});
     return blobToBase64(await exporter.export(current, {format, name, figureTypeId}));
+  },
+  /** Decode a native .styk/.stkz/.stykmov exactly as the app's import worker does (zstd included). */
+  async open({base64, kind}) {
+    const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+    const document = normalizeDecodedDocument((await decodeDocument(bytes, kind)).document, kind);
+    await verifyEmbeddedSource(document);
+    return JSON.stringify(document);
   },
   ready: true,
   /** Receive the document once per revision; later calls only name ticks. */

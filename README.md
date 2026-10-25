@@ -26,7 +26,7 @@ npm run test:mcp:smoke                 # builds and exports clips through the to
 claude mcp add stykmcp -- node /absolute/path/to/stykmcp/mcp/server.mjs
 ```
 
-You also need Python 3.11+ (for `.styk`/`.piv`/`.stk` files) and ffmpeg on `PATH`. `npm run mcp`
+You also need Python 3.11+ (for Pivot `.piv`/`.stk` files) and ffmpeg on `PATH`. `npm run mcp`
 starts the server by hand. Setup for Claude Code and Claude Desktop, the tool reference, example
 prompts, troubleshooting and known limitations are in [docs/MCP.md](docs/MCP.md); the design and
 measurements are in [docs/MCP-PLAN.md](docs/MCP-PLAN.md). In MCP mode nothing leaves your machine:
