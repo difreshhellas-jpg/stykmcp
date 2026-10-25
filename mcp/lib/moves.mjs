@@ -34,7 +34,7 @@ export const MOVES = {
     build: p => cycle(walkStep, p.steps).map(k => ({...k, dx: p.distance * p.steps * k.t}))},
   run: {about: 'run cycle; steps, distance', frames: 8, per: 'step', defaults: {steps: 6, distance: 110},
     build: p => cycle(runStep, p.steps).map(k => ({...k, dx: p.distance * p.steps * k.t}))},
-  jump: {about: 'crouch, jump, land; height, distance', frames: 24, defaults: {height: 110, distance: 0},
+  jump: {about: 'crouch, jump, land; height, distance', frames: 24, beat: ['apex', .55], defaults: {height: 110, distance: 0},
     build: p => [
       {t: 0, pose: {}},
       {t: .2, pose: {torso: 158, head: 165, thigh_l: 62, shin_l: -25, thigh_r: 52, shin_r: -30, arm_l: -50, forearm_l: -30, arm_r: -60, forearm_r: -40}},
@@ -44,7 +44,7 @@ export const MOVES = {
       {t: .86, dx: 1, pose: {torso: 160, head: 168, thigh_l: 60, shin_l: -22, thigh_r: 48, shin_r: -28, arm_l: 40, forearm_l: 50, arm_r: 30, forearm_r: 40}},
       {t: 1, dx: 1, pose: {}},
     ].map(k => ({...k, dx: (k.dx ?? 0) * p.distance}))},
-  punch: {about: 'guard, straight punch, recover; limb (arm_l|arm_r)', frames: 14, defaults: {limb: 'arm_r'},
+  punch: {about: 'guard, straight punch, recover; limb (arm_l|arm_r)', frames: 14, beat: ['impact', .5], defaults: {limb: 'arm_r'},
     build: p => {
       const [a, o] = p.limb === 'arm_l' ? ['l', 'r'] : ['r', 'l'];
       return [
@@ -56,7 +56,7 @@ export const MOVES = {
         {t: 1, pose: {}},
       ];
     }},
-  kick: {about: 'chamber, front kick, recover; limb (leg_l|leg_r), height', frames: 18, defaults: {limb: 'leg_r', height: 1},
+  kick: {about: 'chamber, front kick, recover; limb (leg_l|leg_r), height', frames: 18, beat: ['impact', .45], defaults: {limb: 'leg_r', height: 1},
     build: p => {
       const [k, s] = p.limb === 'leg_l' ? ['l', 'r'] : ['r', 'l'], h = p.height;
       return [
@@ -68,7 +68,7 @@ export const MOVES = {
         {t: 1, dx: 10, pose: {}},
       ];
     }},
-  jump_kick: {about: 'crouch, leap, flying kick, land; limb (leg_l|leg_r), height, distance', frames: 30, defaults: {limb: 'leg_r', height: 90, distance: 120},
+  jump_kick: {about: 'crouch, leap, flying kick, land; limb (leg_l|leg_r), height, distance', frames: 30, beat: ['impact', .48], defaults: {limb: 'leg_r', height: 90, distance: 120},
     build: p => {
       const [k, s] = p.limb === 'leg_l' ? ['l', 'r'] : ['r', 'l'];
       return [
@@ -82,7 +82,7 @@ export const MOVES = {
         {t: 1, dx: 1, pose: {}},
       ].map(key => ({...key, dx: (key.dx ?? 0) * p.distance}));
     }},
-  fall: {about: 'hit, fall backwards, lie on the ground; distance', frames: 24, defaults: {distance: 40},
+  fall: {about: 'hit, fall backwards, lie on the ground; distance', frames: 24, beat: ['lands', .65], defaults: {distance: 40},
     build: p => [
       {t: 0, pose: {}},
       {t: .15, dx: -.2, pose: {torso: 205, head: 215, arm_l: 120, forearm_l: 140, arm_r: 100, forearm_r: 120, thigh_l: 15, thigh_r: 0}},
@@ -130,5 +130,7 @@ export function expandMove(name, params = {}) {
     // Later keys at the same rounded frame win (short durations).
     seen.set(offset, {offset, pose, dx: (key.dx ?? 0) * mirror, lift: (key.lift ?? 0) * intensity});
   }
-  return {duration, keys: [...seen.values()].sort((a, b) => a.offset - b.offset)};
+  // The key moment (impact, apex, landing) lets callers time camera moves and effects to it.
+  const beat = move.beat && {name: move.beat[0], offset: Math.round(move.beat[1] * (duration - 1))};
+  return {duration, keys: [...seen.values()].sort((a, b) => a.offset - b.offset), beat};
 }

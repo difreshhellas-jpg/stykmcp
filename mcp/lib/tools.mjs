@@ -22,9 +22,9 @@ const degrees = z.record(z.string(), z.number());
 
 export const TOOLS = {
   help: {
-    description: 'How-to and reference. topics: basics, moves, presets, camera, effects, easing. Call once before building.',
-    shape: {topic: z.enum(['basics', 'moves', 'presets', 'camera', 'effects', 'easing']).default('basics')},
-    run: (_, {topic}) => typeof HELP[topic] === 'function' ? HELP[topic]() : HELP[topic],
+    description: 'How-to and reference. topics: basics (includes every tool signature), tools, moves, presets, camera, effects, easing. Call once before building.',
+    shape: {topic: z.enum(['basics', 'tools', 'moves', 'presets', 'camera', 'effects', 'easing']).default('basics')},
+    run: (_, {topic}) => topic === 'tools' ? signatures() : topic === 'basics' ? `${HELP.basics}\n\nTools (! required, =default, ? optional):\n${signatures()}` : typeof HELP[topic] === 'function' ? HELP[topic]() : HELP[topic],
   },
   project_new: {
     description: 'Start a new empty animation (replaces the current one).',
@@ -133,14 +133,14 @@ const schemas = Object.fromEntries(Object.entries(TOOLS).map(([name, tool]) => [
 const BATCHABLE = Object.keys(TOOLS).filter(name => !['help', 'preview', 'undo', 'redo'].includes(name));
 
 TOOLS.batch = {
-  description: 'Run many tool calls in order as one undo step: ops=[{tool, args}]. Stops and rolls back on the first error. Not for preview/undo.',
+  description: 'Run many tool calls in order as one undo step: ops=[{tool, args}], args exactly as that tool takes them (see help tools). Stops and rolls back on the first error. Not for preview/undo.',
   shape: {ops: z.array(z.object({tool: z.enum(BATCHABLE), args: z.record(z.string(), z.unknown()).default({})})).min(1).max(200)},
   run: async (s, {ops}) => {
     const lines = [];
     // Validate everything first so a typo late in the list costs no work.
     const parsed = ops.map(({tool, args}, i) => {
       const result = schemas[tool].safeParse(args);
-      if (!result.success) throw new Error(`op ${i + 1} (${tool}): ${formatIssues(result.error)}`);
+      if (!result.success) throw new Error(`op ${i + 1} (${tool}): ${formatIssues(result.error, args)}. Expected ${signature(tool)}`);
       return [tool, result.data];
     });
     const depth = s.undoStack.length, snapshot = JSON.stringify(s.doc);
@@ -159,7 +159,27 @@ TOOLS.batch = {
 };
 schemas.batch = z.object(TOOLS.batch.shape).strict();
 
-export function formatIssues(error) {
-  return error.issues.map(issue => `${issue.path.join('.') || 'args'}: ${issue.message}`).join('; ');
+export function formatIssues(error, args = {}) {
+  return error.issues.map(issue => {
+    const key = issue.path.join('.');
+    const message = issue.path.length === 1 && args?.[issue.path[0]] === undefined ? 'required' : issue.message;
+    return `${key || 'args'}: ${message}`;
+  }).join('; ');
 }
+
+/** One-line signature from a zod shape: name(req!, opt?, def=1, choice: a|b). */
+function describeField(key, field) {
+  let type = field, mark = '!', fallback;
+  for (;;) {
+    const def = type._zod?.def ?? type.def;
+    if (def?.type === 'optional') { mark = '?'; type = def.innerType; }
+    else if (def?.type === 'default') { mark = '='; fallback = typeof def.defaultValue === 'function' ? def.defaultValue() : def.defaultValue; type = def.innerType; }
+    else break;
+  }
+  const def = type._zod?.def ?? type.def, values = def?.type === 'enum' ? Object.values(def.entries) : null;
+  const choices = values && values.length <= 12 ? `:${values.join('|')}` : '';
+  return mark === '=' ? `${key}=${JSON.stringify(fallback)}${choices}` : `${key}${mark}${choices}`;
+}
+export const signature = name => `${name}(${Object.entries(TOOLS[name].shape).map(([key, field]) => describeField(key, field)).join(', ')})`;
+const signatures = () => Object.keys(TOOLS).filter(name => name !== 'help').map(signature).join('\n');
 export {schemas};

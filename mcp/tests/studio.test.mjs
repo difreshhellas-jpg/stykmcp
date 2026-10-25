@@ -193,3 +193,12 @@ test('punch_in holds its zoom across keys made by other tools', async () => {
   for (const tick of [13, 16, 20, 25, 28]) close(1 / hero(s, tick).frame.camera.scale, 1.6, 1e-6);
   close(1 / hero(s, 29).frame.camera.scale, 1, 1e-6);
 });
+
+test('batch validation errors name the field and show the expected signature', async () => {
+  const s = new Studio({host: null});
+  await assert.rejects(TOOLS.batch.run(s, schemas.batch.parse({ops: [{tool: 'move_apply', args: {move: 'jump'}}]})),
+    /op 1 \(move_apply\): figure: required\. Expected move_apply\(figure!, move!:walk\|/);
+  await assert.rejects(TOOLS.batch.run(s, schemas.batch.parse({ops: [{tool: 'figure_add', args: {type: 'stick'}}]})),
+    /Unrecognized key: "type"\. Expected figure_add\(preset\?:stick\|stick_thin\|ball\|ground/);
+  assert.match(TOOLS.help.run(s, {topic: 'basics'}), /camera_fx\(preset!:punch_in\|/);
+});

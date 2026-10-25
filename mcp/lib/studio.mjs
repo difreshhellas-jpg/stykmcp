@@ -510,7 +510,8 @@ export class Studio {
           if (object?.[AUTHORED]) { object.root_x += shiftX; object.root_y += shiftY; }
         }
       }
-      return `${name} ${move} f${start}-${endTick + 1} (${expanded.keys.length} keys), ends at ${this._anchorText(figure, final)}`;
+      const beat = expanded.beat ? `, ${expanded.beat.name} f${startTick + expanded.beat.offset + 1}` : '';
+      return `${name} ${move} f${start}-${endTick + 1} (${expanded.keys.length} keys)${beat}, ends at ${this._anchorText(figure, final)}`;
     });
   }
 
@@ -691,7 +692,8 @@ export const HELP = {
 Stick figure position = the point between its feet when standing (hip is above it); other figures use their origin.
 Angles: absolute bone direction in degrees: 0 down, 90 right, 180 up, -90 left. pose_set "bend" rotates a bone and everything attached to it by a delta.
 Every edit at a frame creates a keyframe there (motion around it is preserved); between keys values interpolate with the key's easing.
-Typical clip: project_new -> figure_add -> move_apply (one or more, in time order) -> camera_fx/effect_add -> preview -> export. Use batch to send many ops in one call.`,
+Typical clip: project_new -> figure_add -> move_apply (one or more, in time order) -> camera_fx/effect_add -> preview -> export. Use batch to send many ops in one call.
+move_apply reports the move's key moment (impact/apex/lands frame): time camera_fx and effects to it. Default move lengths: see help moves.`,
   moves: () => Object.entries(MOVES).map(([name, m]) => `${name}: ${m.about}; default ${m.frames}f${m.per ? ` per ${m.per}` : ''}; defaults ${JSON.stringify(m.defaults)}`).join('\n') +
     '\nAll moves: start, speed (1=normal, 2=twice as fast), frames (override duration), direction (right|left), intensity (0.5 subtle .. 1.5 big), easing. Moves need stick figures; later keys of the figure shift with the move so moves chain.',
   presets: () => Object.entries(PRESETS).map(([name, p]) => `${name}: ${p.about}`).join('\n') + '\nfigure_add file=<path.stk|.stkz|.styk> imports the first figure of a file.',
