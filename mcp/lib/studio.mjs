@@ -18,6 +18,7 @@ import {easedProgress} from '../../src/keyframe-easing.mjs';
 import {EASING_MODES} from './easing.mjs';
 import {PRESETS, presetFigure, boneIds, boneIndex, isStick, toNative, toDegrees, wrap, jointPositions, lowestOffset, bounds, anchorOffset, parseColor, hexColor, LIMBS, poseText} from './figures.mjs';
 import {MOVES, expandMove} from './moves.mjs';
+import {shapeFigure, textFigure, pathFigure, pathWindow, shapeHelp} from './shapes.mjs';
 import {encodeVideo, writeSequence, VIDEO_FORMATS} from './encode.mjs';
 
 const clone = value => structuredClone(value);
@@ -36,6 +37,13 @@ const colorNumber = value => typeof value === 'string' && /^#?[0-9a-f]{6}$/i.tes
 const AUTHORED = '_mcpKey';
 const lerpAngle = (a, b, t) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
 const keyEasing = frame => frame._styk?.easing ?? {interpolation: 'linear'};
+/** Recolor a figure. Shapes keep their two-tone look: main fill in the color, second fill and outline darker. */
+function recolor(type, rgb) {
+  const main = type._styk?.mcpColor, dark = rgb.map(v => Math.round(v * .7)), same = (a, b) => a && b && a.every((v, i) => v === b[i]);
+  for (const s of type.segments) s.color_rgb = main && (type.polyfills?.length ?? 0) > 0 ? [...dark] : [...rgb];
+  for (const p of type.polyfills ?? []) if (p.color_rgb) p.color_rgb = !main || same(p.color_rgb, main) ? [...rgb] : [...dark];
+  if (main) type._styk = {...type._styk, mcpColor: [...rgb]};
+}
 const frameRange = list => {
   if (!list.length) return 'none';
   const parts = []; let a = list[0], b = a;
@@ -350,10 +358,7 @@ export class Studio {
       if (!imported.figure_types?.length) fail('That file holds no figure.');
     }
     return this.mutate(doc => {
-      const typeId = Math.max(0, ...doc.figure_types.map(t => t.figure_type_id)) + 1;
-      const taken = new Set(doc.figure_types.map(t => String(t.name).toLowerCase()));
-      const label = name ?? `${preset ?? 'figure'}${typeId}`;
-      if (taken.has(String(label).toLowerCase())) fail(`A figure named "${label}" exists; pick another name or use pose_set on it.`);
+      const typeId = this._typeId(doc), label = this._label(doc, name, `${preset ?? 'figure'}${typeId}`);
       let figure, pose;
       if (imported) {
         figure = {...clone(imported.figure_types[0]), figure_type_id: typeId, name: label};
@@ -363,22 +368,128 @@ export class Studio {
       } else {
         figure = presetFigure(preset ?? 'stick', typeId, {color, size, canvasWidth: doc.canvas_width, name: label});
       }
-      doc.figure_types.push(figure);
-      const uid = Math.max(0, ...doc.keyframes.flatMap(k => k.objects.map(o => o.unique_id))) + 1;
       const anchor = anchorOffset(figure) * scale;
       const px = x ?? (preset === 'ground' ? 0 : doc.canvas_width / 2), py = y ?? (preset === 'ground' ? doc.canvas_height * .85 : doc.canvas_height * .8);
-      const first = int(from, 'from') - 1, last = to === undefined ? Infinity : int(to, 'to') - 1;
-      this._ensureKey(doc, first);
-      if (Number.isFinite(last) && last + 1 < this._total(doc)) this._ensureKey(doc, last + 1);
-      for (const row of this._rows(doc)) {
-        if (row.start < first || row.start > last) continue;
-        const object = createObject(figure, uid, px, py - anchor, {scale});
-        if (pose) Object.assign(object, clone(pose));
-        if (row.start === first) object[AUTHORED] = true;
-        doc.keyframes[row.index].objects.push(object);
-        this._reorder(doc.keyframes[row.index]);
-      }
+      const uid = this._place(doc, figure, {from, to, make: () => ({root_x: px, root_y: py - anchor, scale, ...(pose ? clone(pose) : {})})});
       return `added ${label} (uid ${uid}, ${figure.segments.length} bones) at ${Math.round(px)},${Math.round(py)}`;
+    });
+  }
+  _typeId(doc) { return Math.max(0, ...doc.figure_types.map(t => t.figure_type_id)) + 1; }
+  _label(doc, name, fallback) {
+    const label = name ?? fallback;
+    if (doc.figure_types.some(t => String(t.name).toLowerCase() === String(label).toLowerCase())) fail(`A figure named "${label}" exists; pick another name or use pose_set on it.`);
+    return label;
+  }
+  /**
+   * Add a figure type and one object of it, present from..to (1-based). make(tick) returns the
+   * object's fields at each key; authored(tick) marks the keys it owns (default: only the first).
+   */
+  _place(doc, figure, {from = 1, to, make, authored}) {
+    doc.figure_types.push(figure);
+    const uid = Math.max(0, ...doc.keyframes.flatMap(k => k.objects.map(o => o.unique_id))) + 1;
+    const first = int(from, 'from') - 1, last = to === undefined ? Infinity : int(to, 'to') - 1;
+    if (last < first) fail('to must be at or after from.');
+    authored ??= tick => tick === first;
+    this._ensureKey(doc, first);
+    if (Number.isFinite(last) && last + 1 < this._total(doc)) this._ensureKey(doc, last + 1);
+    else if (Number.isFinite(last)) this._ensureKey(doc, last);
+    for (const row of this._rows(doc)) {
+      if (row.start < first || row.start > last) continue;
+      const {root_x, root_y, ...fields} = make(row.start), object = createObject(figure, uid, root_x, root_y, fields);
+      if (authored(row.start)) object[AUTHORED] = true;
+      doc.keyframes[row.index].objects.push(object);
+      this._reorder(doc.keyframes[row.index]);
+    }
+    return uid;
+  }
+  async addShape({kind, x, y, name, from = 1, to, ...shape}) {
+    return this.mutate(doc => {
+      const typeId = this._typeId(doc), label = this._label(doc, name, `${kind}${typeId}`);
+      const figure = shapeFigure({kind, ...shape}, typeId, label);
+      const px = x ?? doc.canvas_width / 2, py = y ?? doc.canvas_height / 2;
+      this._place(doc, figure, {from, to, make: () => ({root_x: px, root_y: py})});
+      return `added ${label} (${kind}) at ${Math.round(px)},${Math.round(py)}`;
+    });
+  }
+  async addText({text, x, y, name, from = 1, to, ...style}) {
+    return this.mutate(doc => {
+      const typeId = this._typeId(doc), label = this._label(doc, name, `text${typeId}`);
+      const {figure, box} = textFigure({text, ...style}, typeId, label);
+      const px = x ?? doc.canvas_width / 2, py = y ?? doc.canvas_height / 2;
+      this._place(doc, figure, {from, to, make: () => ({root_x: px, root_y: py})});
+      return `added ${label} (text ${Math.round(box[0])}x${Math.round(box[1])}) at ${Math.round(px)},${Math.round(py)}`;
+    });
+  }
+  /** Draw a stroke on over start..end, optionally hold, then erase (or travel as a comet). */
+  async drawPath({name, start = 1, end, mode = 'draw', trail = .3, erase, erase_end, to, easing = 'ease-out', ...path}) {
+    if (!EASING_MODES.includes(easing)) fail(`easing must be one of ${EASING_MODES.join(', ')}.`);
+    return this.mutate(doc => {
+      const first = int(start, 'start') - 1, last = int(end ?? start + 11, 'end') - 1;
+      if (last <= first) fail('end must be after start.');
+      if (last - first > 480) fail('Draw over at most 480 frames.');
+      const typeId = this._typeId(doc), label = this._label(doc, name, `path${typeId}`);
+      const {figure, points} = pathFigure(path, typeId, label);
+      const ease = t => easedProgress({interpolation: easing}, Math.max(0, Math.min(1, t)));
+      let window, keyed = tick => tick >= first && tick <= last, stop = to === undefined ? undefined : int(to, 'to') - 1;
+      if (mode === 'comet') {
+        if (!(trail > 0 && trail <= 1)) fail('trail must be in (0, 1].');
+        window = tick => { const head = ease((tick - first) / (last - first)) * (1 + trail); return [head - trail, head]; };
+        stop = last;
+      } else if (mode === 'draw') {
+        const e0 = erase === undefined ? undefined : int(erase, 'erase') - 1, e1 = e0 === undefined ? undefined : int(erase_end ?? erase + 7, 'erase_end') - 1;
+        if (e0 !== undefined && (e0 <= last || e1 <= e0)) fail('erase must be after end, and erase_end after erase.');
+        if (e0 !== undefined) { stop = e1; keyed = tick => (tick >= first && tick <= last) || (tick >= e0 && tick <= e1); }
+        else if (stop !== undefined && stop < last) fail('to must be at or after end.');
+        window = tick => [e0 !== undefined && tick >= e0 ? ease((tick - e0) / (e1 - e0)) : 0, ease((tick - first) / (last - first))];
+      } else fail('mode must be draw or comet.');
+      for (let tick = first; tick <= (stop ?? last); tick++) if (keyed(tick)) this._ensureKey(doc, tick);
+      this._place(doc, figure, {from: start, to: stop === undefined ? undefined : stop + 1, authored: keyed, make: tick => {
+        const [a, b] = window(keyed(tick) ? tick : last), view = pathWindow(points, a, b);
+        return {root_x: view.x, root_y: view.y, len_flag: 1, lengths: view.lengths};
+      }});
+      const length = Math.round(points.slice(1).reduce((sum, p, i) => sum + Math.hypot(p[0] - points[i][0], p[1] - points[i][1]), 0));
+      return `${label}: ${mode} ${length}px path f${start}-${last + 1}${stop !== undefined ? `, gone after f${stop + 1}` : ', stays'}`;
+    });
+  }
+  /** Copies of a figure that replay its motion with a delay and an offset (glitch clones, afterimages, crowds). */
+  cloneFigure({figure: ref, count = 1, delay = 2, dx = 0, dy = 0, color, opacity, fade = false, from, to, order = 'back', name}) {
+    return this.mutate(doc => {
+      const {uid, figure: type, name: base} = this._figure(doc, ref);
+      int(count, 'count', 1, 12); int(delay, 'delay', 0, 1000);
+      const present = this._rows(doc).filter(r => this._objectAt(doc, r.index, uid, false));
+      const first = int(from ?? present[0].start + 1, 'from') - 1, last = int(to ?? this._total(doc), 'to') - 1;
+      const sourceKeys = present.filter(r => this._objectAt(doc, r.index, uid)[AUTHORED]).map(r => r.start);
+      const added = [];
+      for (let c = 1; c <= count; c++) {
+        const shift = delay * c, ticks = new Set([first, last]);
+        for (const t of sourceKeys) if (t + shift > first && t + shift < last) ticks.add(t + shift);
+        // Sample the original before adding keys: a copy at tick shows the original at tick - shift.
+        const poses = new Map([...ticks].map(tick => [tick, this._sampled(doc, Math.max(0, tick - shift)).objects.find(o => o.unique_id === uid)]));
+        const typeId = this._typeId(doc), label = this._label(doc, name ? `${name}${c}` : undefined, `${base}_copy${c}`);
+        const copy = {...clone(type), figure_type_id: typeId, name: label};
+        const fadeTo = opacity ?? (fade ? 1 : undefined), alphaOf = fadeTo === undefined ? null : fade ? fadeTo * (1 - c / (count + 1)) : fadeTo;
+        if (alphaOf !== null && !(alphaOf >= 0 && alphaOf <= 1)) fail('opacity must be 0-1.');
+        const rgb = color === undefined ? null : parseColor(color);
+        if (rgb) recolor(copy, rgb);
+        for (const s of copy.segments) { if (alphaOf !== null) s.transparency = Math.round(255 - (255 - (s.transparency ?? 0)) * alphaOf); }
+        for (const p of copy.polyfills ?? []) { if (alphaOf !== null) p.color_alpha = (p.color_alpha ?? 1) * alphaOf; }
+        for (const tick of ticks) this._ensureKey(doc, tick);
+        const id = this._place(doc, copy, {from: first + 1, to: last + 1, authored: tick => ticks.has(tick) && Boolean(poses.get(tick)), make: tick => {
+          const pose = poses.get(tick) ?? poses.get(first);
+          if (!pose) fail(`${base} is not present at frame ${tick - shift + 1}.`);
+          const {unique_id, figure_type_id, object_slot, [AUTHORED]: _, ...fields} = snapshotPoseObject(pose);
+          for (const key of Object.keys(fields)) if (key.startsWith('_runtime') || key === '_movieclipSample') delete fields[key];
+          return {...clone(fields), root_x: pose.root_x + dx * c, root_y: pose.root_y + dy * c};
+        }});
+        for (const frame of doc.keyframes) {
+          const ids = frameOrder(frame), at = ids.indexOf(id), anchor = ids.indexOf(uid);
+          if (at < 0 || anchor < 0) continue;
+          ids.splice(at, 1); ids.splice(order === 'front' ? ids.indexOf(uid) + 1 : ids.indexOf(uid), 0, id);
+          setOrder(frame, ids);
+        }
+        added.push(label);
+      }
+      return `${base}: ${added.join(', ')} (delay ${delay}f, offset ${dx},${dy} each) f${first + 1}-${last + 1}`;
     });
   }
   removeFigure({figure}) {
@@ -398,7 +509,7 @@ export class Studio {
         if (doc.figure_types.some(t => t !== type && String(t.name).toLowerCase() === rename.toLowerCase())) fail(`"${rename}" is taken.`);
         type.name = rename; out.push(`renamed ${rename}`);
       }
-      if (color) { const rgb = parseColor(color); for (const s of type.segments) s.color_rgb = [...rgb]; for (const p of type.polyfills ?? []) if (p.color_rgb) p.color_rgb = [...rgb]; out.push(`color ${color}`); }
+      if (color) { recolor(type, parseColor(color)); out.push(`color ${color}`); }
       if (order) {
         for (const frame of doc.keyframes) {
           const ids = frameOrder(frame), i = ids.indexOf(uid);
@@ -622,13 +733,13 @@ export class Studio {
     for (const object of sampled.objects) {
       const figure = doc.figure_types.find(t => t.figure_type_id === object.figure_type_id);
       const present = this._rows(doc).filter(r => doc.keyframes[r.index].objects.some(o => o.unique_id === object.unique_id));
-      const kind = isStick(figure) ? 'stick' : `${figure.segments.length} bones`;
-      const color = hexColor(figure.segments.find(s => s.visible !== false)?.color_rgb ?? [0, 0, 0]);
+      const kind = figure._styk?.mcpKind ?? (isStick(figure) ? 'stick' : `${figure.segments.length} bones`);
+      const color = hexColor(figure._styk?.mcpColor ?? figure.polyfills?.[0]?.color_rgb ?? figure.segments.find(s => s.visible !== false)?.color_rgb ?? [0, 0, 0]);
       let line = `- ${this._name(doc, object)} (uid ${object.unique_id}, ${kind}, ${color}) at ${this._anchorText(figure, object)} scale ${r1(object.scale)} box ${bounds(figure, object).join(',')}`;
       if (present.length !== doc.keyframes.length) line += ` keys ${frameRange(present.map(r => r.start + 1))}`;
       lines.push(line);
       if (poses) lines.push(`  ${poseText(figure, object)}`);
-      if (!isStick(figure) && figure.segments.length > 1) topologies.set(boneIds(figure).join(' '), true);
+      if (!isStick(figure) && !figure._styk?.mcpKind && figure.segments.length > 1) topologies.set(boneIds(figure).join(' '), true);
     }
     if (doc.keyframes[0].objects.some(o => isStick(doc.figure_types.find(t => t.figure_type_id === o.figure_type_id)))) lines.push('stick bones: torso head arm_l forearm_l arm_r forearm_r thigh_l shin_l thigh_r shin_r');
     for (const topology of topologies.keys()) lines.push(`bones: ${topology}`);
@@ -693,11 +804,17 @@ export const HELP = {
 Stick figure position = the point between its feet when standing (hip is above it); other figures use their origin.
 Angles: absolute bone direction in degrees: 0 down, 90 right, 180 up, -90 left. pose_set "bend" rotates a bone and everything attached to it by a delta.
 Every edit at a frame creates a keyframe there (motion around it is preserved); between keys values interpolate with the key's easing.
-Typical clip: project_new -> figure_add -> move_apply (one or more, in time order) -> camera_fx/effect_add -> preview -> export. Use batch to send many ops in one call.
+Typical clip: project_new -> shape_add/text_add (set) -> figure_add -> move_apply (one or more, in time order) -> camera_fx/effect_add -> preview -> export. Use batch to send many ops in one call.
 move_apply reports the move's key moment (impact/apex/lands frame): time camera_fx and effects to it. Default move lengths: see help moves.`,
   moves: () => Object.entries(MOVES).map(([name, m]) => `${name}: ${m.about}; default ${m.frames}f${m.per ? ` per ${m.per}` : ''}; defaults ${JSON.stringify(m.defaults)}`).join('\n') +
     '\nAll moves: start, speed (1=normal, 2=twice as fast), frames (override duration), direction (right|left), intensity (0.5 subtle .. 1.5 big), easing. Moves need stick figures; later keys of the figure shift with the move so moves chain.',
   presets: () => Object.entries(PRESETS).map(([name, p]) => `${name}: ${p.about}`).join('\n') + '\nfigure_add file=<path.stk|.stkz|.styk> imports the first figure of a file.',
+  shapes: () => `shape_add kinds (sizes px, x,y = center; fill "none" = outline only; stroke/width = outline; color2 = second color):
+${shapeHelp()}
+text_add: text (\\n for lines), size px, align left|center|right (x = that edge), bold, italic, outline px.
+path_draw: draws a stroke on from start to end and keeps it; erase=<frame> wipes it from its start; mode comet = a streak (trail = 0-1 of the path) that travels and vanishes. taper=true for a brush look.
+figure_clone: count copies, copy k shows the figure delay*k frames late, offset dx*k,dy*k; fade or opacity, color.
+All of these are figures: pose_set x,y,scale,turn moves them, figure_update recolors (one color), effect_add targets them by name, from/to limit when they show.`,
   camera: () => `camera_set: center x,y, zoom (2 = 2x closer), rotation deg, at frame(s).
 camera_fx presets: punch_in (quick zoom to a figure or x,y then back at end; zoom, ramp frames), zoom (zoom and stay), ${Object.entries(CAMERA_MOTION_TYPES).map(([k, v]) => `${k} (${v})`).join(', ')}.
 camera_fx params for native presets: intensity, ${Object.keys(MOTION_PARAMETERS).join(', ')}.`,

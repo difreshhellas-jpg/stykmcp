@@ -103,6 +103,31 @@ await call('preview', {count: 8});
 const kick = await probe(path.join(workdir, 'clips', 'jump-kick.mp4'));
 assert.equal(kick.frames, 72); assert.ok(Math.abs(kick.duration - 3) < .05);
 const scenario = report.slice(typical);
+// 6. Shapes, text, drawn strokes and clones: a 2-second desktop scene, saved as .styk and .piv.
+const scene = await call('batch', {ops: [
+  {tool: 'project_new', args: {frames: 48, background: '#2b5797'}},
+  {tool: 'shape_add', args: {kind: 'rect', name: 'taskbar', x: 480, y: 525, w: 960, h: 30, fill: '#1b1f2a'}},
+  {tool: 'shape_add', args: {kind: 'folder', name: 'docs', x: 60, y: 60, w: 56, h: 44, fill: '#f2c94c'}},
+  {tool: 'shape_add', args: {kind: 'window', name: 'win', x: 640, y: 200, w: 420, h: 260, fill: '#ffffff'}},
+  {tool: 'shape_add', args: {kind: 'cursor', name: 'cursor', x: 300, y: 300, size: 28, fill: '#ffffff', stroke: '#000000', width: 2}},
+  {tool: 'text_add', args: {text: 'Scan complete: 0 threats', name: 'msg', x: 640, y: 200, size: 24, bold: true, from: 30}},
+  {tool: 'figure_add', args: {preset: 'stick', name: 'hero', x: 300, y: 470, color: '#ff6b2c'}},
+  {tool: 'move_apply', args: {figure: 'hero', move: 'walk', start: 1, steps: 4}},
+  {tool: 'figure_clone', args: {figure: 'hero', count: 2, delay: 3, dx: -24, color: '#ff2020', fade: true}},
+  {tool: 'path_draw', args: {shape: 'circle', x: 640, y: 230, radius: 70, width: 8, taper: true, start: 4, end: 18}},
+  {tool: 'path_draw', args: {points: [[400, 330], [560, 300], [780, 320]], mode: 'comet', start: 10, end: 28}},
+  {tool: 'pose_set', args: {figure: 'cursor', frame: 40, x: 640, y: 220}},
+  {tool: 'export', args: {path: 'clips/desktop.mp4'}},
+  {tool: 'project_save', args: {path: 'clips/desktop.styk'}},
+  {tool: 'project_save', args: {path: 'clips/desktop.piv'}},
+]});
+console.log(scene.text);
+const desktop = await probe(path.join(workdir, 'clips', 'desktop.mp4'));
+assert.equal(desktop.frames, 48);
+for (const ext of ['styk', 'piv']) {
+  await call('project_open', {path: `clips/desktop.${ext}`});
+  assert.match((await call('scene_describe', {frame: 30})).text, /msg \(uid \d+, (text|2 bones)/, ext);
+}
 await client.close();
 
 const scenarioText = scenario.reduce((n, r) => n + (r.images ? 0 : r.chars), 0);

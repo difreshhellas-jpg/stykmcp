@@ -111,13 +111,17 @@ Conventions (also in `help basics`):
 
 | Tool | Purpose |
 | --- | --- |
-| `help(topic)` | `basics` (with every tool signature), `tools`, `moves`, `presets`, `camera`, `effects`, `easing` |
+| `help(topic)` | `basics` (with every tool signature), `tools`, `moves`, `presets`, `shapes`, `camera`, `effects`, `easing` |
 | `project_new(width, height, fps, frames, background, name)` | New empty animation |
 | `project_set(...)` | Change size, fps, length, background, name |
 | `project_open(path)` | Open `.styk`, `.piv`, `.stk` or `.json` |
 | `project_save(path)` | Save `.styk` (editable), `.piv`/`.stk` (Pivot), `.json` |
 | `scene_describe(frame, poses)` | Compact text summary: length, keys, figures with anchor and box, camera, fx |
 | `figure_add(preset or file, name, x, y, scale, color, size, from, to)` | Presets: `stick`, `stick_thin`, `ball`, `ground`; or import the first figure of a `.stk`/`.stkz`/`.styk` |
+| `shape_add(kind, x, y, w, h, size, points, radius, fill, color2, stroke, width, opacity, rotation, name, from, to)` | Shapes as figures: `rect ellipse circle ring polygon line star arrow cursor window folder` |
+| `text_add(text, x, y, size, color, bold, italic, align, opacity, outline, outline_color, name, from, to)` | Vector text (bundled Noto Sans); x,y is the align edge and the vertical middle |
+| `path_draw(points or shape, x, y, radius, color, width, taper, start, end, mode, trail, erase, erase_end, to, easing)` | A stroke that draws itself on screen (`circle arc spiral wave` or smoothed points); `erase` wipes it later; `mode: comet` sends a streak along the path |
+| `figure_clone(figure, count, delay, dx, dy, color, opacity, fade, from, to, order)` | Copies that replay a figure's motion `delay` frames later and offset: glitch clones, afterimages, crowds |
 | `figure_remove(figure)`, `figure_update(figure, rename, color, order)` | Remove, rename, recolor, front/back |
 | `pose_set(figure, frame(s), angles, bend, x, y, dx, dy, scale, turn, flip, ground, easing)` | Key a pose |
 | `ik_reach(figure, limb, frame, x, y, bend)` | Put a hand or foot on a point (two-bone IK) |
@@ -131,6 +135,10 @@ Conventions (also in `help basics`):
 | `export(path, format, start, end, fps, width, alpha)` | `mp4`, `webm` (alpha), `gif`, or `png` (folder of frames) |
 | `undo(steps)`, `redo(steps)` | Whole tool calls |
 | `batch(ops)` | Many of the above in one call: `[{tool, args}]` |
+
+Shapes, text, drawn paths and clones are ordinary figures: `pose_set` moves, scales (`scale`) and
+rotates (`turn`) them, `figure_update` recolors them, `effect_add` can target them by name, and
+`from`/`to` limit when they are on screen.
 
 Outputs are short status lines. Only `preview` returns an image; everything else is written to disk
 and returns its path.
@@ -158,7 +166,11 @@ and returns its path.
    `fight-wave.piv` and as `fight-wave.styk`."
 4. "A stick figure runs across a dark night scene with a cyan glow, then jumps over a ball; add
    smoke where it lands. Show me a contact sheet before exporting a WebM."
-5. "Create a 4-second loop of an idle breathing stick figure, export it as a PNG sequence at 30 fps
+5. "A desktop with two folder icons, a window titled sketch.exe and a mouse cursor. An orange stick
+   figure walks in, draws a fire ring that draws itself on in the window, and three faded red copies
+   of a second figure follow it half a second behind. Show the text "Scan complete: 0 threats" at the
+   end."
+6. "Create a 4-second loop of an idle breathing stick figure, export it as a PNG sequence at 30 fps
    for my video editor."
 
 ## Troubleshooting
@@ -183,7 +195,10 @@ and returns its path.
 - `.piv`/`.stk` cannot store effects, camera motion clips or IK, as in the app itself: saving a
   `.piv` with effects is refused (remove them with `fx_remove` or save `.styk`, which keeps
   everything). Pivot export bakes interpolation into one key per frame.
-- Audio, drawing layers, movieclips and text are not exposed as tools.
+- Audio, drawing layers and movieclips are not exposed as tools.
+- Text uses the bundled Noto Sans; text cannot be typed out letter by letter.
+- `figure_update color` gives a figure one color; shapes keep a darker outline and second fill.
+- `figure_clone` copies the figure's motion keys; effects on the original are not copied.
 - One document per server; tool calls run one at a time.
 - Rendering uses a software Canvas 2D path: correct, but a 1080p minute takes a while.
 - The desktop app in this fork still uses upstream's packaging identity, update feed and interface

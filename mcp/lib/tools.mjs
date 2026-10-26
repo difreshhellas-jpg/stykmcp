@@ -7,6 +7,7 @@ import {HELP} from './studio.mjs';
 import {MOVES} from './moves.mjs';
 import {PRESETS} from './figures.mjs';
 import {EASING_MODES} from './easing.mjs';
+import {SHAPE_KINDS} from './shapes.mjs';
 
 /** Relative paths resolve against STYKMCP_WORKDIR (default ~/StykMCP), never the client's cwd. */
 export const workdir = () => path.resolve(process.env.STYKMCP_WORKDIR || path.join(os.homedir(), 'StykMCP'));
@@ -22,8 +23,8 @@ const degrees = z.record(z.string(), z.number());
 
 export const TOOLS = {
   help: {
-    description: 'How-to and reference. topics: basics (includes every tool signature), tools, moves, presets, camera, effects, easing. Call once before building.',
-    shape: {topic: z.enum(['basics', 'tools', 'moves', 'presets', 'camera', 'effects', 'easing']).default('basics')},
+    description: 'How-to and reference. topics: basics (includes every tool signature), tools, moves, presets, shapes, camera, effects, easing. Call once before building.',
+    shape: {topic: z.enum(['basics', 'tools', 'moves', 'presets', 'shapes', 'camera', 'effects', 'easing']).default('basics')},
     run: (_, {topic}) => topic === 'tools' ? signatures() : topic === 'basics' ? `${HELP.basics}\n\nTools (! required, =default, ? optional):\n${signatures()}` : typeof HELP[topic] === 'function' ? HELP[topic]() : HELP[topic],
   },
   project_new: {
@@ -59,6 +60,41 @@ export const TOOLS = {
       x: z.number().optional(), y: z.number().optional(), scale: z.number().positive().default(1), color: color.optional(),
       size: z.number().positive().optional().describe('ball diameter / ground width'), from: frame.default(1), to: frame.optional()},
     run: (s, a) => s.addFigure({...a, file: a.file && file(a.file)}),
+  },
+  shape_add: {
+    description: `Add a shape as a figure (move/scale/turn it with pose_set): ${SHAPE_KINDS.join(', ')}. x,y = center. See help shapes.`,
+    shape: {kind: z.enum(SHAPE_KINDS), x: z.number().optional(), y: z.number().optional(), w: z.number().positive().optional(), h: z.number().positive().optional(),
+      size: z.number().positive().optional(), points: z.array(z.tuple([z.number(), z.number()])).max(200).optional().describe('relative to x,y'),
+      radius: z.number().min(0).optional(), sides: int(3, 24).optional(), inner: z.number().min(.05).max(1).optional(),
+      fill: z.union([color, z.literal('none')]).optional(), color2: color.optional(), stroke: color.optional(), width: z.number().min(0).max(200).optional(),
+      opacity: z.number().min(0).max(1).optional(), rotation: z.number().optional(), name: z.string().max(60).optional(), from: frame.default(1), to: frame.optional()},
+    run: (s, a) => s.addShape(a),
+  },
+  text_add: {
+    description: 'Add text (vector, Noto Sans) as a figure. x,y = anchor: align edge and vertical middle.',
+    shape: {text: z.string().min(1).max(2000), x: z.number().optional(), y: z.number().optional(), size: z.number().min(4).max(1000).default(32), color: color.optional(),
+      bold: z.boolean().default(false), italic: z.boolean().default(false), align: z.enum(['left', 'center', 'right']).default('center'),
+      opacity: z.number().min(0).max(1).default(1), outline: z.number().min(0).max(64).default(0), outline_color: color.optional(),
+      name: z.string().max(60).optional(), from: frame.default(1), to: frame.optional()},
+    run: (s, a) => s.addText(a),
+  },
+  path_draw: {
+    description: 'Animate a stroke being drawn on screen from start to end (then stays, or erase later); mode comet = a streak travelling along the path. Path: points (canvas coords, smooth) or shape circle|arc|spiral|wave around x,y.',
+    shape: {points: z.array(z.tuple([z.number(), z.number()])).max(200).optional(), smooth: z.boolean().default(true), closed: z.boolean().default(false),
+      shape: z.enum(['circle', 'arc', 'spiral', 'wave']).optional(), x: z.number().optional(), y: z.number().optional(), radius: z.number().positive().optional(),
+      start_angle: z.number().optional().describe('deg, 0 down 90 right'), sweep: z.number().optional().describe('arc deg, + clockwise'), turns: z.number().positive().optional(), length: z.number().positive().optional(),
+      color: color.optional(), width: z.number().positive().max(200).default(6), taper: z.boolean().default(false), opacity: z.number().min(0).max(1).default(1),
+      start: frame.default(1), end: frame.optional().describe('drawn by this frame (default start+11)'), mode: z.enum(['draw', 'comet']).default('draw'),
+      trail: z.number().min(.01).max(1).default(.3), erase: frame.optional().describe('start erasing at'), erase_end: frame.optional(), to: frame.optional().describe('vanish after'),
+      easing: easing.default('ease-out'), name: z.string().max(60).optional()},
+    run: (s, a) => s.drawPath(a),
+  },
+  figure_clone: {
+    description: 'Copies of a figure replaying its motion delay frames later, offset dx,dy each: glitch clones, afterimage trails, crowds. Own color/opacity; fade=true fades each copy more.',
+    shape: {figure, count: int(1, 12).default(1), delay: int(0, 1000).default(2), dx: z.number().default(0), dy: z.number().default(0),
+      color: color.optional(), opacity: z.number().min(0).max(1).optional(), fade: z.boolean().default(false), from: frame.optional(), to: frame.optional(),
+      order: z.enum(['back', 'front']).default('back'), name: z.string().max(50).optional()},
+    run: (s, a) => s.cloneFigure(a),
   },
   figure_remove: {description: 'Remove a figure everywhere.', shape: {figure}, run: (s, a) => s.removeFigure(a)},
   figure_update: {

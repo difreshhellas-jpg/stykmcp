@@ -167,7 +167,7 @@ Token cost, measured by the smoke test (characters of tool output):
 | 2-second jump: batch, describe, preview, export, undo | 5 | 688 chars | one 480 px contact sheet |
 | 3-second jump kick: help basics, help moves, batch with export, preview | 4 | 4,024 chars (help is 3,672 of it) | one 640 px contact sheet |
 | Real agent run: help basics, batch with export | 2 | 2,723 chars | none |
-| Tool list (sent once per session) | – | about 13,400 chars for 22 tools | – |
+| Tool list (sent once per session) | – | about 19,200 chars for 26 tools | – |
 
 A contact sheet is billed as image tokens by its pixel size (a 640x~330 sheet is roughly 300
 tokens), not by its base64 length.

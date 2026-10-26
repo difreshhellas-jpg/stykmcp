@@ -17,7 +17,8 @@
 
 `mcp/` adds a stdio [MCP](https://modelcontextprotocol.io) server that drives the animation engine
 headlessly: no editor window, no GPU, compact text replies, one-call batches and preset moves (walk,
-run, jump, punch, kick, jump kick, fall, wave, idle, crouch), with MP4, WebM, GIF and PNG export.
+run, jump, punch, kick, jump kick, fall, wave, idle, crouch), shapes, text, self-drawing strokes and
+delayed figure copies, with MP4, WebM, GIF and PNG export.
 
 ```sh
 npm ci

@@ -77,6 +77,11 @@ export function bounds(figure, object) {
   for (const {start, end} of jointPositions(figure, object)) for (const p of [start, end]) {
     x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
   }
+  const index = figure.segments.findIndex(s => s.segment_kind === 'text'), text = index >= 0 && figure.text_assets?.[0]?.bounds;
+  if (text) {
+    const k = object.scale ?? 1, {start} = jointPositions(figure, object)[index];
+    return [start.x, start.y - text.height * k, start.x + text.width * k, start.y].map(Math.round);
+  }
   return [x0 - pad, y0 - pad, x1 + pad, y1 + pad].map(Math.round);
 }
 

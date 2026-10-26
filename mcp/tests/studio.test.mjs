@@ -202,3 +202,96 @@ test('batch validation errors name the field and show the expected signature', a
     /Unrecognized key: "type"\. Expected figure_add\(preset\?:stick\|stick_thin\|ball\|ground/);
   assert.match(TOOLS.help.run(s, {topic: 'basics'}), /camera_fx\(preset!:punch_in\|/);
 });
+
+const sample = (s, tick, name) => {
+  const rows = nativeTimeline(s.doc), type = s.doc.figure_types.find(t => t.name === name);
+  let index = 0; while (index + 1 < rows.length && rows[index + 1].start <= tick) index++;
+  const frame = evaluatedFrame(s.doc, index, rows[index].count > 1 ? (tick - rows[index].start) / s.doc.keyframes[index].duration_raw : 0, tick);
+  const object = frame.objects.find(o => o.figure_type_id === type.figure_type_id);
+  return {frame, object, figure: type, joints: object && [...buildGeometry(s.doc, frame).objects.values()].find(o => o.obj.unique_id === object.unique_id).joints};
+};
+const drawn = (s, tick, name) => { const {object} = sample(s, tick, name); return object ? object.lengths.reduce((a, b) => a + b, 0) : null; };
+
+test('shape_add builds filled, stroked shapes whose vertices sit around x,y', async () => {
+  const s = await studio();
+  await s.addShape({kind: 'rect', name: 'box', x: 200, y: 100, w: 80, h: 40, fill: '#ff0000', stroke: '#000000', width: 2});
+  const {figure, joints} = sample(s, 0, 'box');
+  assert.equal(figure.polyfills.length, 1);
+  assert.deepEqual(figure.polyfills[0].color_rgb, [255, 0, 0]);
+  const corners = figure.polyfills[0].segment_ids.map(id => joints.get(id)).map(p => [Math.round(p.x), Math.round(p.y)]);
+  assert.deepEqual(corners, [[160, 80], [240, 80], [240, 120], [160, 120]]);
+  assert.equal(figure.segments.filter(seg => seg.visible).length, 4);
+  for (const kind of ['ellipse', 'circle', 'ring', 'star', 'arrow', 'cursor', 'window', 'folder'])
+    await s.addShape({kind, w: 60, h: 40, size: 50, name: kind});
+  await s.addShape({kind: 'line', points: [[0, 0], [50, 20]], name: 'stroke'});
+  assert.equal(sample(s, 0, 'ring').figure.polyfills.length, 0);
+  await assert.rejects(s.addShape({kind: 'rect', w: 10}), /rect needs w, h/);
+  // A shape is a figure: pose_set moves and turns it rigidly around x,y.
+  s.pose({figure: 'box', frame: 10, x: 400, y: 300, turn: 90});
+  const turned = sample(s, 9, 'box');
+  const moved = turned.figure.polyfills[0].segment_ids.map(id => turned.joints.get(id)).map(p => [Math.round(p.x), Math.round(p.y)]);
+  assert.deepEqual(moved, [[380, 340], [380, 260], [420, 260], [420, 340]]);
+});
+
+test('text_add anchors text at x,y', async () => {
+  const s = await studio();
+  await s.addText({text: 'Scan complete\n0 threats', name: 'msg', x: 480, y: 270, size: 30, bold: true});
+  const box = line => line.match(/box (-?\d+),(-?\d+),(-?\d+),(-?\d+)/).slice(1).map(Number);
+  const [x0, y0, x1, y1] = box(s.describe().split('\n').find(l => l.startsWith('- msg')));
+  assert.ok(Math.abs((x0 + x1) / 2 - 480) <= 1 && Math.abs((y0 + y1) / 2 - 270) <= 1, `${x0},${y0},${x1},${y1}`);
+  assert.ok(y1 - y0 > 50, `two lines tall: ${y1 - y0}`);
+  await s.addText({text: 'left', name: 'l', x: 100, y: 50, align: 'left'});
+  assert.equal(box(s.describe().split('\n').find(l => l.startsWith('- l ')))[0], 100);
+  assert.match(s.describe(), /msg \(uid \d+, text,/);
+});
+
+test('path_draw draws on, holds, erases; comet travels and vanishes', async () => {
+  const s = await studio();
+  const out = await s.drawPath({name: 'ring', shape: 'circle', x: 300, y: 200, radius: 50, start: 5, end: 15, erase: 30, erase_end: 35, easing: 'linear'});
+  assert.match(out, /f5-15, gone after f35/);
+  const full = 2 * Math.PI * 50;
+  assert.equal(drawn(s, 3, 'ring'), null);
+  close(drawn(s, 4, 'ring'), 0, 1e-6);
+  close(drawn(s, 9, 'ring'), full / 2, full * .02);
+  close(drawn(s, 14, 'ring'), full, full * .02);
+  close(drawn(s, 25, 'ring'), full, full * .02);
+  close(drawn(s, 32, 'ring'), full * .4, full * .03);
+  assert.equal(drawn(s, 36, 'ring'), null);
+  // The visible part starts where erasing has reached: the origin moves along the path.
+  const {object} = sample(s, 32, 'ring');
+  assert.ok(Math.hypot(object.root_x - 300, object.root_y - 200) > 45, 'origin stays on the circle');
+  await s.drawPath({name: 'streak', points: [[100, 300], [300, 280], [500, 320]], mode: 'comet', trail: .25, start: 10, end: 20, easing: 'linear'});
+  const lengths = [10, 15, 19].map(f => drawn(s, f - 1, 'streak'));
+  assert.ok(lengths[1] > lengths[0] && lengths[1] > lengths[2], lengths.join());
+  assert.equal(drawn(s, 21, 'streak'), null);
+  assert.ok(s.doc.figure_types.find(t => t.name === 'streak').segments.length >= 2);
+});
+
+test('figure_clone replays the figure late and offset, behind it', async () => {
+  const s = await studio();
+  s.move({figure: 'hero', move: 'walk', start: 1, steps: 4});
+  const out = s.cloneFigure({figure: 'hero', count: 2, delay: 4, dx: -30, color: '#ff0000', fade: true});
+  assert.match(out, /hero_copy1, hero_copy2/);
+  for (const tick of [8, 12, 20, 28]) {
+    const original = sample(s, tick - 8, 'hero').object, copy = sample(s, tick, 'hero_copy2').object;
+    close(copy.root_x, original.root_x - 60, 1.5);
+    copy.angles.forEach((angle, i) => close(Math.cos(angle - original.angles[i]), 1, 2e-3));
+  }
+  const type = s.doc.figure_types.find(t => t.name === 'hero_copy1');
+  assert.deepEqual(type.segments[0].color_rgb, [255, 0, 0]);
+  assert.ok(type.segments[0].transparency > 0);
+  const order = s.doc.keyframes[0].object_draw_order_unique_ids, uid = name => s._figure(s.doc, name).uid;
+  assert.ok(order.indexOf(uid('hero_copy1')) < order.indexOf(uid('hero')) && order.indexOf(uid('hero_copy2')) < order.indexOf(uid('hero')));
+  s.undo(); assert.ok(!s.doc.figure_types.some(t => t.name === 'hero_copy1'));
+});
+
+test('new tools work in a batch and roll back together', async () => {
+  const s = await studio();
+  await assert.rejects(TOOLS.batch.run(s, {ops: [
+    {tool: 'shape_add', args: {kind: 'window', w: 300, h: 200, name: 'win'}},
+    {tool: 'text_add', args: {text: 'hi', name: 'label'}},
+    {tool: 'path_draw', args: {shape: 'arc', x: 1, y: 1, start: 10, end: 5}},
+  ]}), /op 3 \(path_draw\) failed: end must be after start/);
+  assert.ok(!s.doc.figure_types.some(t => t.name === 'win' || t.name === 'label'));
+  assert.ok(schemas.shape_add.safeParse({kind: 'star', size: 40}).success);
+});
