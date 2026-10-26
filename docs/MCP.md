@@ -166,7 +166,7 @@ and returns its path.
 | Symptom | Fix |
 | --- | --- |
 | `No headless browser could start` | Run `npx playwright install chromium`, or set `STYKMCP_BROWSER=msedge` (Windows) / `chrome`. |
-| `ffmpeg was not found` | Install ffmpeg (see Install), open a new terminal/restart Claude, or set `STYKMCP_FFMPEG`/`STYKMCP_FFPROBE`. PNG export still works. |
+| `ffmpeg was not found` | Install ffmpeg (see Install). On Windows the server also finds winget, scoop and Chocolatey installs that are not on `PATH` yet; otherwise restart Claude or set `STYKMCP_FFMPEG`/`STYKMCP_FFPROBE`. PNG export still works. |
 | `The local codec service ... could not start` | Install Python 3.11+ (`py -3 --version` on Windows) or set `STYK_PYTHON`. Needed only for `.piv/.stk`. |
 | GPU or WebGPU errors | The server never uses the GPU (`--disable-gpu`; export is Canvas 2D). Errors mentioning WebGPU come from the desktop editor, not StykMCP. |
 | Claude Desktop shows the server as failed | Check the paths in the JSON (double backslashes), use the full path to `node.exe`, and read the logs (Settings → Developer). The server logs to stderr only. |

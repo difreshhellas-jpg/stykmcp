@@ -1,10 +1,35 @@
 // Video/GIF encoding with the system ffmpeg; PNG sequences are written directly.
 import {spawn, execFile} from 'node:child_process';
+import {existsSync, readdirSync} from 'node:fs';
 import {mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 
-const FFMPEG = () => process.env.STYKMCP_FFMPEG || 'ffmpeg';
-const FFPROBE = () => process.env.STYKMCP_FFPROBE || 'ffprobe';
+// winget, scoop and choco installs only reach PATH in processes started afterwards, so an MCP
+// client that was already running cannot find ffmpeg by name. Look in their folders as well.
+function windowsInstall(tool) {
+  const exe = `${tool}.exe`, local = process.env.LOCALAPPDATA, home = process.env.USERPROFILE;
+  const candidates = [
+    local && path.join(local, 'Microsoft', 'WinGet', 'Links', exe),
+    home && path.join(home, 'scoop', 'shims', exe),
+    process.env.ProgramData && path.join(process.env.ProgramData, 'chocolatey', 'bin', exe),
+  ].filter(Boolean);
+  const packages = local && path.join(local, 'Microsoft', 'WinGet', 'Packages');
+  try {
+    for (const pkg of readdirSync(packages).filter(name => /ffmpeg/i.test(name))) {
+      for (const build of readdirSync(path.join(packages, pkg))) candidates.push(path.join(packages, pkg, build, 'bin', exe));
+    }
+  } catch { /* no winget packages folder */ }
+  return candidates.find(file => existsSync(file));
+}
+const found = new Map();
+const locate = (tool, env) => {
+  if (process.env[env]) return process.env[env];
+  if (!found.has(tool)) found.set(tool, (process.platform === 'win32' && !onPath(tool) && windowsInstall(tool)) || tool);
+  return found.get(tool);
+};
+const onPath = tool => (process.env.PATH ?? '').split(path.delimiter).some(dir => dir && existsSync(path.join(dir, `${tool}.exe`)));
+const FFMPEG = () => locate('ffmpeg', 'STYKMCP_FFMPEG');
+const FFPROBE = () => locate('ffprobe', 'STYKMCP_FFPROBE');
 const missing = tool => new Error(`${tool} was not found. Install ffmpeg (Windows: winget install Gyan.FFmpeg; Linux: apt install ffmpeg), open a new terminal, or set STYKMCP_FFMPEG/STYKMCP_FFPROBE to its full path.`);
 
 const even = 'pad=ceil(iw/2)*2:ceil(ih/2)*2';
